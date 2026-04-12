@@ -8,12 +8,12 @@ var scrollDuration = 8000;
 var scrollLanes = 500;
 var fixedMaxWidthRatio = 0.8;
 var seekThreshold = 5.5;
+var pressureThreshold = 40;
 
-var _nicoStroke = "-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,-2px 0 0 #000,2px 0 0 #000,0 -2px 0 #000,0 2px 0 #000,-1px -2px 0 #000,1px -2px 0 #000,-1px 2px 0 #000,1px 2px 0 #000,-2px -1px 0 #000,2px -1px 0 #000,-2px 1px 0 #000,2px 1px 0 #000";
 var _nicoFontFamily = "'Hiragino Sans','Hiragino Kaku Gothic ProN','Noto Sans JP','Yu Gothic','Meiryo','MS Gothic','MS Mincho',SimHei,SimSun,monospace";
 
 function buildCmtCSS(fontSize) {
-  var css = ".cmt{font-family:" + _nicoFontFamily + " !important;text-shadow:" + _nicoStroke + " !important;white-space:pre !important;}";
+  var css = ".cmt{font-family:" + _nicoFontFamily + " !important;white-space:pre !important;}";
   if (fontSize) {
     css += ".cmt{font-size:" + fontSize + "px !important;}";
   }
@@ -100,6 +100,14 @@ function initCommentManager() {
   cm = new CommentManager(container);
   cm.init();
   cm.start();
+
+  cm.addEventListener("enterComment", function (cmt) {
+    var count = cm.runline.length;
+    if (count > pressureThreshold) {
+      var decay = Math.max(0.1, 1 - (count - pressureThreshold) / pressureThreshold);
+      cmt.dom.style.opacity = (cmt._alpha * cm.options.global.opacity * decay) + "";
+    }
+  });
 
   injectFontStyle();
 }
@@ -216,19 +224,24 @@ function seekToTime(newTimeMs) {
     cm._allocateSpace(cmt);
 
     cmt.dom.style.transition = "none";
+    cmt.dom.style.transform = "";
+    cmt.dom.style.webkitTransform = "";
     cmt.dom.style.left = currentX + "px";
-    cmt._x = currentX;
-    cmt._dirtyCSS = true;
+    cmt._x = null;
+    cmt._dirtyCSS = false;
     cmt.ttl = remaining * 1000;
     cmt.dur = scrollDuration;
 
-    cm.runline.push(cmt);
+    void cmt.dom.offsetWidth;
 
-    requestAnimationFrame(function () {
-      cmt.dom.style.transition = "transform " + cmt.ttl + "ms linear";
-      cmt.x = -textWidth;
-      cmt._dirtyCSS = false;
-    });
+    cmt.dom.style.transition = "transform " + cmt.ttl + "ms linear";
+    var targetX = -textWidth;
+    var dx = targetX - currentX;
+    cmt._x = currentX;
+    CssCompatLayer.transform(cmt.dom, "translateX(" + dx + "px)");
+    cmt._x = targetX;
+
+    cm.runline.push(cmt);
   });
 }
 
