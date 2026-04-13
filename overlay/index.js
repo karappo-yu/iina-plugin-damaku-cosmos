@@ -95,7 +95,8 @@ function createDanmaku(d, seekTime = null) {
   el.textContent = d.text;
   el.style.color = d.c;
   el.style.opacity = currentOpacity;
-  el.style.fontSize = 'var(--global-fs)';
+  const danmakuFs = (d.size / _refWidth * 100).toFixed(4) + 'vw';
+  el.style.fontSize = danmakuFs;
 
   if (isScroll) el.classList.add('dm-scroll');
   else if (isBottom) el.classList.add('dm-bottom');
@@ -195,11 +196,13 @@ iina.onMessage("load-danmaku", (data) => {
     let p = match[1].split(",");
     let colorVal = parseInt(p[3]);
     if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
+    let danmakuSize = parseInt(p[2]) || currentFontSize;
     list.push({
       t: parseFloat(p[0]),
       m: parseInt(p[1]),
       c: "#" + colorVal.toString(16).padStart(6, '0'),
-      text: match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      text: match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+      size: danmakuSize
     });
   }
   allDanmaku = list.sort((a, b) => a.t - b.t);
