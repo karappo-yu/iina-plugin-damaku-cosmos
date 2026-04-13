@@ -241,6 +241,9 @@ iina.onMessage("toggle-danmaku", (data) => {
 
 iina.onMessage("set-opacity", (data) => {
   currentOpacity = data.opacity;
+  activeDanmaku.forEach(item => {
+    item.el.style.opacity = currentOpacity;
+  });
 });
 
 iina.onMessage("set-fontsize", (data) => {
