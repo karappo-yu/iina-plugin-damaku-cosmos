@@ -22,6 +22,7 @@
   "preferenceDefaults": {
     "danmakuEnabled": true,
     "danmakuOpacity": 0.7,
+    "danmakuFontScale": 1.0,
     "danmakuSpeed": 680,
     "scrollDuration": 8000
   }

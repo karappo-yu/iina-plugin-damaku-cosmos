@@ -10,7 +10,7 @@ var mpv = iina.mpv;
 
 var danmakuEnabled = preferences.get("danmakuEnabled");
 var currentOpacity = preferences.get("danmakuOpacity");
-var currentFontScale = 1.0;
+var currentFontScale = preferences.get("danmakuFontScale");
 var currentSpeed = preferences.get("danmakuSpeed");
 var currentScrollDuration = preferences.get("scrollDuration");
 var overlayReady = false;
@@ -166,6 +166,8 @@ function registerSidebarHandlers() {
 
   sidebar.onMessage("set-fontscale", function (data) {
     currentFontScale = data.scale;
+    preferences.set("danmakuFontScale", currentFontScale);
+    preferences.sync();
     overlay.postMessage("set-fontscale", { scale: data.scale });
   });
 
