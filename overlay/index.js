@@ -10,10 +10,21 @@ let isPaused = false;
 // --- 动态参数 ---
 let danmakuVisible = true;
 let currentOpacity = 0.8;
-let scrollDuration = 8000;
+let scrollDuration = 4000; // Nico 经典滚动基准时间为 4s
 let fixedDuration = 4000;
 let fontScale = 1.0;
 const _refWidth = 1920; 
+
+// --- Nico 专属颜色映射表 (Niconico Color Dict) ---
+const NICO_COLORS = {
+  red: '#FF0000', pink: '#FF8080', orange: '#FFC000', yellow: '#FFFF00',
+  green: '#00FF00', cyan: '#00FFFF', blue: '#0000FF', purple: '#C000FF',
+  black: '#000000', white: '#FFFFFF', white2: '#CCCC99', niconicowhite: '#CCCC99',
+  red2: '#CC0033', truered: '#CC0033', pink2: '#FF33CC', orange2: '#FF6600',
+  passionorange: '#FF6600', yellow2: '#999900', mikan: '#999900',
+  green2: '#00CC66', cyan2: '#00CCCC', blue2: '#3399FF', marineblue: '#3399FF',
+  purple2: '#6633CC', black2: '#666666'
+};
 
 // --- 动态轨道控制 ---
 let maxLanes = 0;
@@ -21,7 +32,6 @@ let scrollLanes = [];
 let topLanes = [];
 let bottomLanes = [];
 
-// 彻底重置轨道状态，防止跳转进度后的时间戳污染
 function resetLaneData() {
   scrollLanes = new Array(maxLanes).fill(0);
   topLanes = new Array(maxLanes).fill(0);
@@ -33,7 +43,8 @@ function updateLanes() {
   const winW = window.innerWidth;
   const refScale = winW / _refWidth;
   const baseSize = 25 * fontScale;
-  const laneHeight = baseSize * refScale * 1.15;
+  // Nico 弹幕通常排列非常紧密，行距极小
+  const laneHeight = baseSize * refScale * 1.1; 
 
   const newMaxLanes = Math.max(1, Math.floor(winH / laneHeight));
 
@@ -42,8 +53,6 @@ function updateLanes() {
     resetLaneData();
   }
 }
-
-
 
 function getFreeLane(lanesArr, textW, winW, durMs, videoTimeMs, danmakuSize) {
   const lanesNeeded = danmakuSize / 25;
@@ -60,14 +69,16 @@ function getFreeLane(lanesArr, textW, winW, durMs, videoTimeMs, danmakuSize) {
     }
     if (enoughSpace) {
       const speed = (winW + textW) / durMs;
+      // 碰撞计算：确保当前弹幕的尾部离开屏幕右侧边缘的时间
       const clearTime = textW > 0 ? (textW / speed) : durMs;
       for (let k = 0; k < Math.ceil(lanesNeeded); k++) {
-        lanesArr[i + k] = videoTimeMs + clearTime + 300;
+        lanesArr[i + k] = videoTimeMs + clearTime + 100; // Nico 的拥挤度允许更近的尾随
       }
       return i;
     }
   }
 
+  // 完美还原 Nico 特性：如果屏幕满了，强制覆盖存在时间最久的轨道，制造弹幕厚度
   let earliestLane = 0;
   for (let i = 1; i < maxLanes; i++) {
     if (lanesArr[i] < lanesArr[earliestLane]) earliestLane = i;
@@ -82,13 +93,11 @@ function createDanmaku(d, seekTime = null) {
   const isBottom = d.m === 4;
   const isTop = d.m === 5;
   
-  // 检查屏蔽类型
   if (isScroll && window._blockScroll) return;
   if (isTop && window._blockTop) return;
   if (isBottom && window._blockBottom) return;
   const durMs = isScroll ? scrollDuration : fixedDuration;
 
-  // 使用传入的当前时间或弹幕自身时间戳
   const videoTimeMs = d.t * 1000;
   const elapsedMs = seekTime !== null ? (seekTime - d.t) * 1000 : 0;
   
@@ -116,12 +125,12 @@ function createDanmaku(d, seekTime = null) {
   const lane = getFreeLane(lanesRef, textW, winW, durMs, videoTimeMs, d.size);
   
   const laneHeightVh = (100 / maxLanes); 
-  const jitter = (Math.random() - 0.5) * (laneHeightVh * 0.25);
+  const jitter = (Math.random() - 0.5) * (laneHeightVh * 0.15); // 微小的扰动，让满屏时更自然
 
   if (isScroll || isTop) {
     el.style.top = `${lane * laneHeightVh + jitter}vh`;
   } else if (isBottom) {
-    el.style.bottom = `${lane * laneHeightVh + jitter + 2}vh`; 
+    el.style.bottom = `${lane * laneHeightVh + jitter + 1}vh`; 
   }
 
   el.style.setProperty('--dur', `${durMs}ms`);
@@ -152,7 +161,6 @@ function handleSeek(timeSec) {
   container.innerHTML = '';
   activeDanmaku.clear();
   
-  // 修复核心：每次 Seek 必须重置所有轨道的时间戳，否则会发生堆叠
   resetLaneData();
   updateLanes(); 
   
@@ -174,7 +182,6 @@ function handleSeek(timeSec) {
 
 iina.onMessage("time-update", (data) => {
   let t = data.time;
-  // 正常播放时，如果时间跳跃超过 1.5 秒，视为手动调整进度
   if (Math.abs(t - lastTime) > 1.5) {
     handleSeek(t);
   } else if (!isPaused) {
@@ -192,23 +199,78 @@ iina.onMessage("load-danmaku", (data) => {
   if (data.opacity) currentOpacity = data.opacity;
   updateLanes();
   
-  let xmlStr = decodeURIComponent("%" + data.xmlContent.match(/.{1,2}/g).join("%"));
-  const regex = /<d p="([^"]+)">([\s\S]*?)<\/d>/g;
+  // 性能极度优化：使用正则替换替代 split/join，防止超大 XML 导致内存溢出
+  const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
+  const xmlStr = decodeURIComponent(encodedStr);
+  
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(xmlStr, "text/xml");
+  const chats = xmlDoc.getElementsByTagName('chat');
   let list = [];
-  let match;
-  while ((match = regex.exec(xmlStr)) !== null) {
-    let p = match[1].split(",");
-    let colorVal = parseInt(p[3]);
-    if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
-    let danmakuSize = parseInt(p[2]) || 25;
-    list.push({
-      t: parseFloat(p[0]),
-      m: parseInt(p[1]),
-      c: "#" + colorVal.toString(16).padStart(6, '0'),
-      text: match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
-      size: danmakuSize
-    });
+
+  // --- 核心：Niconico <chat> 解析逻辑 ---
+  if (chats.length > 0) {
+    for (let i = 0; i < chats.length; i++) {
+      const el = chats[i];
+      const text = el.textContent;
+      if (!text) continue;
+
+      // 解析 10ms 精度的 vpos
+      const vpos = parseInt(el.getAttribute('vpos') || "0", 10);
+      const mail = el.getAttribute('mail') || "";
+      const commands = mail.toLowerCase().split(/\s+/);
+
+      // 解析指令：位置
+      let mode = 1; 
+      if (commands.includes('shita')) mode = 4;
+      else if (commands.includes('ue')) mode = 5;
+
+      // 解析指令：字号
+      let size = 25; 
+      if (commands.includes('big')) size = 36;
+      else if (commands.includes('small')) size = 15;
+
+      // 解析指令：颜色
+      let color = '#FFFFFF';
+      for (const cmd of commands) {
+        if (NICO_COLORS[cmd]) {
+          color = NICO_COLORS[cmd];
+          break;
+        }
+        if (cmd.startsWith('#') && (cmd.length === 7 || cmd.length === 4)) {
+          color = cmd;
+          break;
+        }
+      }
+
+      list.push({
+        t: vpos / 100, // 转换为秒
+        m: mode,
+        c: color,
+        text: text,
+        size: size
+      });
+    }
+  } else {
+    // --- 优雅降级：如果用户丢进来的是 Bilibili 的 <d> 标签文件 ---
+    const regex = /<d p="([^"]+)">([\s\S]*?)<\/d>/g;
+    let match;
+    while ((match = regex.exec(xmlStr)) !== null) {
+      let p = match[1].split(",");
+      let colorVal = parseInt(p[3]);
+      if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
+      let danmakuSize = parseInt(p[2]) || 25;
+      list.push({
+        t: parseFloat(p[0]),
+        m: parseInt(p[1]),
+        c: "#" + colorVal.toString(16).padStart(6, '0'),
+        text: match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+        size: danmakuSize
+      });
+    }
   }
+
+  // 严格按时间重排
   allDanmaku = list.sort((a, b) => a.t - b.t);
   handleSeek(0);
 });
@@ -254,9 +316,7 @@ iina.onMessage("set-opacity", (data) => {
 iina.onMessage("set-fontscale", (data) => {
   fontScale = data.scale;
   updateLanes();
-  container.querySelectorAll('.dm-item').forEach(el => {
-    el.style.fontSize = (el.dataset.size * fontScale / _refWidth * 100).toFixed(4) + 'vw';
-  });
+  handleSeek(lastTime);
 });
 
 iina.onMessage("set-scroll-duration", (data) => {
@@ -271,7 +331,6 @@ iina.onMessage("clear-danmaku", () => {
 });
 
 iina.onMessage("block-type", (data) => {
-  // 简单实现：在 createDanmaku 中检查
   window._blockScroll = data.blockScroll;
   window._blockTop = data.blockTop;
   window._blockBottom = data.blockBottom;
@@ -283,4 +342,6 @@ window.addEventListener("resize", () => {
   updateLanes();
   iina.postMessage("resize", {});
 });
-setInterval(() => iina.postMessage("overlay-ready", {}), 300);
+
+// IPC 通讯只需确认一次即可
+setTimeout(() => iina.postMessage("overlay-ready", {}), 300);
