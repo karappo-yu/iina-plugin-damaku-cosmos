@@ -11,6 +11,8 @@ var seekThreshold = 5.5;
 var pressureSafeLimit = 30;
 var pressureDecayRate = 0.005;
 var pressureHardFloor = 0.35;
+var _lastTimeUpdateMs = 0;
+var _animFrameId = null;
 
 var _nicoFontFamily = "'Hiragino Sans','Hiragino Kaku Gothic ProN','Noto Sans JP','Yu Gothic','Meiryo','MS Gothic','MS Mincho',SimHei,SimSun,monospace";
 var _refWidth = 1920;
@@ -34,6 +36,12 @@ function buildCmtCSS(fontSize) {
 
 function hexToString(hex) {
   return decodeURIComponent("%" + hex.match(/.{1,2}/g).join("%"));
+}
+
+function getCurrentPlaybackTime() {
+  if (isPaused || _lastTimeUpdateMs === 0) return cmTime;
+  var delta = (performance.now() - _lastTimeUpdateMs) / 1000;
+  return cmTime + delta;
 }
 
 function patchColorSetter() {
@@ -66,6 +74,13 @@ function patchScrollDuration() {
     origCssInit.call(this, recycle);
     this.dur = scrollDuration;
     this.ttl = scrollDuration;
+    this.dom.style.transition = "none";
+    this.dom.style.willChange = "transform";
+    this._dirtyCSS = false;
+  };
+
+  CssScrollComment.prototype.update = function () {
+    this._dirtyCSS = false;
   };
 }
 
@@ -111,6 +126,46 @@ function patchFixedCommentAutoSize() {
   };
 }
 
+function updateDanmakuPositions() {
+  if (!cm || !danmakuVisible) return;
+
+  var containerWidth = cm.width;
+  if (containerWidth <= 0) return;
+
+  var currentTime = getCurrentPlaybackTime();
+  var durSec = scrollDuration / 1000;
+
+  for (var i = cm.runline.length - 1; i >= 0; i--) {
+    var cmt = cm.runline[i];
+
+    if (cmt.mode === 4 || cmt.mode === 5) continue;
+
+    var elapsed = currentTime - cmt.stime;
+    if (elapsed < 0) continue;
+
+    var progress = elapsed / durSec;
+    if (progress >= 1) {
+      cmt.finish();
+      cm.runline.splice(i, 1);
+      continue;
+    }
+
+    var textWidth = cmt.dom.offsetWidth;
+    if (textWidth <= 0) continue;
+
+    var totalDistance = containerWidth + textWidth;
+    var currentX = containerWidth - progress * totalDistance;
+
+    cmt.dom.style.left = currentX + "px";
+    cmt._x = currentX;
+  }
+}
+
+function renderLoop() {
+  updateDanmakuPositions();
+  _animFrameId = requestAnimationFrame(renderLoop);
+}
+
 function initCommentManager() {
   var container = document.getElementById("commentCanvas");
   if (!container) return;
@@ -133,6 +188,7 @@ function initCommentManager() {
   });
 
   injectFontStyle();
+  _animFrameId = requestAnimationFrame(renderLoop);
 }
 
 function injectFontStyle() {
@@ -158,7 +214,7 @@ function loadDanmakuFromHex(hexString) {
   window._provider = new CommentProvider();
   cm.clear();
   window._provider.addTarget(cm);
-  cmResize();
+  cm.setBounds();
   cm.init();
   cm.start();
 
@@ -191,11 +247,6 @@ function clearDanmaku() {
   cm._lastPosition = 0;
 }
 
-function cmResize() {
-  if (!cm) return;
-  cm.setBounds();
-}
-
 function seekToTime(newTimeMs) {
   if (!cm || !cm.timeline || cm.timeline.length === 0) return;
 
@@ -204,69 +255,24 @@ function seekToTime(newTimeMs) {
 
   var newTimeSec = newTimeMs / 1000;
   var durSec = scrollDuration / 1000;
-  var candidates = [];
 
   for (var i = 0; i < cm.timeline.length; i++) {
     var cmtData = cm.timeline[i];
     if (cmtData.stime > newTimeSec) break;
     var cmtEnd = cmtData.stime + durSec;
     if (cmtEnd <= newTimeSec) continue;
-    if (cmtData.mode !== 1 && cmtData.mode !== 2 && cmtData.mode !== 6) continue;
     if (!cm.validate(cmtData)) continue;
-    candidates.push(cmtData);
-  }
 
-  if (candidates.length === 0) return;
-
-  var containerWidth = cm.width;
-  if (containerWidth <= 0) return;
-
-  var _canvas = document.createElement("canvas");
-  var _ctx = _canvas.getContext("2d");
-  var fontStyle = document.getElementById("dm-font-style");
-  var globalRefSize = 25;
-  if (fontStyle) {
-    var match = fontStyle.textContent.match(/font-size:\s*([\d.]+)vw/);
-    if (match) globalRefSize = parseFloat(match[1]) / 100 * _refWidth;
-  }
-
-  candidates.forEach(function (cmtData) {
     var elapsed = newTimeSec - cmtData.stime;
     var remaining = durSec - elapsed;
-    if (remaining <= 0) return;
-
-    var refSize = cmtData.size || globalRefSize;
-    var actualFontSize = refToActualPx(refSize);
-    _ctx.font = actualFontSize + "px " + _nicoFontFamily;
-    var textWidth = _ctx.measureText(cmtData.text || "").width;
-    var totalDistance = containerWidth + textWidth;
-    var currentX = containerWidth - (elapsed / durSec) * totalDistance;
-
-    if (currentX < -textWidth || currentX > containerWidth) return;
+    if (remaining <= 0) continue;
 
     var cmt = cm.factory.create(cm, cmtData);
     cm._allocateSpace(cmt);
-
-    cmt.dom.style.transition = "none";
-    cmt.dom.style.transform = "";
-    cmt.dom.style.webkitTransform = "";
-    cmt.dom.style.left = currentX + "px";
-    cmt._x = null;
-    cmt._dirtyCSS = false;
     cmt.ttl = remaining * 1000;
     cmt.dur = scrollDuration;
-
-    void cmt.dom.offsetWidth;
-
-    cmt.dom.style.transition = "transform " + cmt.ttl + "ms linear";
-    var targetX = -textWidth;
-    var dx = targetX - currentX;
-    cmt._x = currentX;
-    CssCompatLayer.transform(cmt.dom, "translateX(" + dx + "px)");
-    cmt._x = targetX;
-
     cm.runline.push(cmt);
-  });
+  }
 }
 
 iina.onMessage("apply-settings", function (data) {
@@ -325,6 +331,7 @@ iina.onMessage("time-update", function (data) {
     seekToTime(Math.floor(t * 1000));
   }
   cmTime = t;
+  _lastTimeUpdateMs = performance.now();
   cm.time(Math.floor(t * 1000));
 });
 
@@ -335,6 +342,7 @@ iina.onMessage("pause-state", function (data) {
     cm.stop();
   } else {
     cm.start();
+    _lastTimeUpdateMs = performance.now();
   }
 });
 
@@ -397,56 +405,9 @@ iina.onMessage("block-type", function (data) {
   cm.filter.allowTypes[2] = !data.blockScroll;
 });
 
-var _resizeTimer = null;
-
-function handleResize() {
+iina.onMessage("resize", function () {
   if (!cm) return;
   cm.setBounds();
-
-  var containerWidth = cm.width;
-  if (containerWidth <= 0 || cmTime <= 0) return;
-
-  var durSec = scrollDuration / 1000;
-
-  for (var i = cm.runline.length - 1; i >= 0; i--) {
-    var cmt = cm.runline[i];
-
-    if (cmt.mode === 4 || cmt.mode === 5) continue;
-
-    var elapsed = cmTime - cmt.stime;
-    if (elapsed < 0 || elapsed >= durSec) {
-      cmt.finish();
-      cm.runline.splice(i, 1);
-      continue;
-    }
-
-    var remaining = durSec - elapsed;
-    var textWidth = cmt.dom.offsetWidth;
-    if (textWidth <= 0) continue;
-
-    var totalDistance = containerWidth + textWidth;
-    var currentX = containerWidth - (elapsed / durSec) * totalDistance;
-    var targetX = -textWidth;
-    var dx = targetX - currentX;
-
-    cmt.dom.style.transition = "none";
-    cmt.dom.style.transform = "";
-    cmt.dom.style.webkitTransform = "";
-    cmt.dom.style.left = currentX + "px";
-    cmt._x = null;
-
-    void cmt.dom.offsetWidth;
-
-    cmt.dom.style.transition = "transform " + (remaining * 1000) + "ms linear";
-    CssCompatLayer.transform(cmt.dom, "translateX(" + dx + "px)");
-    cmt._x = targetX;
-    cmt.ttl = remaining * 1000;
-  }
-}
-
-iina.onMessage("resize", function () {
-  if (_resizeTimer) clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(handleResize, 100);
 });
 
 iina.onMessage("ack", function () {
@@ -457,8 +418,8 @@ iina.onMessage("ack", function () {
 });
 
 window.addEventListener("resize", function () {
-  if (_resizeTimer) clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(handleResize, 100);
+  if (!cm) return;
+  cm.setBounds();
 });
 
 document.addEventListener("visibilitychange", function () {
@@ -466,6 +427,7 @@ document.addEventListener("visibilitychange", function () {
   if (document.visibilityState === "visible") {
     cm.start();
     cm.clear();
+    _lastTimeUpdateMs = performance.now();
   } else {
     cm.stop();
     cm.clear();
