@@ -12,7 +12,7 @@ var blockBottom = document.getElementById("block-bottom");
 var state = {
   enabled: true,
   opacity: 0.7,
-  fontSize: 25,
+  fontScale: 1.0,
   speed: 680,
   scrollDuration: 8000,
   blockScroll: false,
@@ -24,8 +24,8 @@ function updateUI() {
   toggleDanmaku.checked = state.enabled;
   opacitySlider.value = state.opacity;
   opacityValue.textContent = Math.round(state.opacity * 100) + "%";
-  fontsizeSlider.value = state.fontSize;
-  fontsizeValue.textContent = state.fontSize;
+  fontsizeSlider.value = Math.round(state.fontScale * 100);
+  fontsizeValue.textContent = Math.round(state.fontScale * 100) + "%";
   durationSlider.value = state.scrollDuration;
   durationValue.textContent = (state.scrollDuration / 1000).toFixed(1) + "s";
   blockScroll.checked = state.blockScroll;
@@ -52,9 +52,9 @@ opacitySlider.addEventListener("input", function () {
 });
 
 fontsizeSlider.addEventListener("input", function () {
-  var val = parseInt(fontsizeSlider.value, 10);
-  fontsizeValue.textContent = val;
-  iina.postMessage("set-fontsize", { size: val });
+  var val = parseFloat(fontsizeSlider.value) / 100;
+  fontsizeValue.textContent = Math.round(val * 100) + "%";
+  iina.postMessage("set-fontscale", { scale: val });
 });
 
 durationSlider.addEventListener("input", function () {
@@ -70,10 +70,9 @@ blockBottom.addEventListener("change", sendBlockType);
 iina.onMessage("danmaku-state", function (data) {
   if (data.enabled !== undefined) state.enabled = data.enabled;
   if (data.opacity !== undefined) state.opacity = data.opacity;
-  if (data.fontSize !== undefined) state.fontSize = data.fontSize;
+  if (data.fontScale !== undefined) state.fontScale = data.fontScale;
   if (data.speed !== undefined) state.speed = data.speed;
   if (data.scrollDuration !== undefined) state.scrollDuration = data.scrollDuration;
-  if (data.scrollLanes !== undefined) state.scrollLanes = data.scrollLanes;
   updateUI();
 });
 

@@ -10,7 +10,7 @@ var mpv = iina.mpv;
 
 var danmakuEnabled = preferences.get("danmakuEnabled");
 var currentOpacity = preferences.get("danmakuOpacity");
-var currentFontSize = preferences.get("danmakuFontSize");
+var currentFontScale = 1.0;
 var currentSpeed = preferences.get("danmakuSpeed");
 var currentScrollDuration = preferences.get("scrollDuration");
 var overlayReady = false;
@@ -74,7 +74,7 @@ function loadDanmakuForVideo(url) {
   var payload = {
     xmlContent: hexContent,
     opacity: currentOpacity,
-    fontSize: currentFontSize,
+    fontScale: currentFontScale,
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
   };
@@ -97,7 +97,7 @@ function markOverlayReady() {
 
   overlay.postMessage("apply-settings", {
     opacity: currentOpacity,
-    fontSize: currentFontSize,
+    fontScale: currentFontScale,
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
   });
@@ -164,11 +164,9 @@ function registerSidebarHandlers() {
     overlay.postMessage("set-opacity", { opacity: data.opacity });
   });
 
-  sidebar.onMessage("set-fontsize", function (data) {
-    currentFontSize = data.size;
-    preferences.set("danmakuFontSize", currentFontSize);
-    preferences.sync();
-    overlay.postMessage("set-fontsize", { size: data.size });
+  sidebar.onMessage("set-fontscale", function (data) {
+    currentFontScale = data.scale;
+    overlay.postMessage("set-fontscale", { scale: data.scale });
   });
 
   sidebar.onMessage("set-speed", function (data) {
@@ -193,7 +191,7 @@ function registerSidebarHandlers() {
     sidebar.postMessage("danmaku-state", {
       enabled: danmakuEnabled,
       opacity: currentOpacity,
-      fontSize: currentFontSize,
+      fontScale: currentFontScale,
       speed: currentSpeed,
       scrollDuration: currentScrollDuration,
     });
@@ -266,7 +264,7 @@ menu.addItem(
     overlay.postMessage("load-danmaku", {
       xmlContent: hexContent,
       opacity: currentOpacity,
-      fontSize: currentFontSize,
+      fontScale: currentFontScale,
       speed: currentSpeed,
       scrollDuration: currentScrollDuration,
     });

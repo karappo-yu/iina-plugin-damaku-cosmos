@@ -12,7 +12,7 @@ let danmakuVisible = true;
 let currentOpacity = 0.8;
 let scrollDuration = 8000;
 let fixedDuration = 4000;
-let currentFontSize = 25; 
+let fontScale = 1.0;
 const _refWidth = 1920; 
 
 // --- 动态轨道控制 ---
@@ -32,21 +32,18 @@ function updateLanes() {
   const winH = window.innerHeight;
   const winW = window.innerWidth;
   const refScale = winW / _refWidth;
-  const laneHeight = currentFontSize * refScale * 1.15;
-  
+  const baseSize = 25 * fontScale;
+  const laneHeight = baseSize * refScale * 1.15;
+
   const newMaxLanes = Math.max(1, Math.floor(winH / laneHeight));
-  
+
   if (newMaxLanes !== maxLanes) {
     maxLanes = newMaxLanes;
     resetLaneData();
   }
 }
 
-function updateGlobalFontSize() {
-  const winW = window.innerWidth;
-  const fontSizeVw = (currentFontSize / _refWidth * 100).toFixed(4);
-  document.documentElement.style.setProperty('--global-fs', `${fontSizeVw}vw`);
-}
+
 
 function getFreeLane(lanesArr, textW, winW, durMs, videoTimeMs) {
   // 增加随机起始偏移，让弹幕分布更散更自然
@@ -95,7 +92,8 @@ function createDanmaku(d, seekTime = null) {
   el.textContent = d.text;
   el.style.color = d.c;
   el.style.opacity = currentOpacity;
-  const danmakuFs = (d.size / _refWidth * 100).toFixed(4) + 'vw';
+  el.dataset.size = d.size;
+  const danmakuFs = (d.size * fontScale / _refWidth * 100).toFixed(4) + 'vw';
   el.style.fontSize = danmakuFs;
 
   if (isScroll) el.classList.add('dm-scroll');
@@ -182,10 +180,9 @@ iina.onMessage("time-update", (data) => {
 });
 
 iina.onMessage("load-danmaku", (data) => {
-  if (data.fontSize) currentFontSize = data.fontSize;
+  if (data.fontScale) fontScale = data.fontScale;
   if (data.scrollDuration) scrollDuration = data.scrollDuration;
   if (data.opacity) currentOpacity = data.opacity;
-  updateGlobalFontSize();
   updateLanes();
   
   let xmlStr = decodeURIComponent("%" + data.xmlContent.match(/.{1,2}/g).join("%"));
@@ -196,7 +193,7 @@ iina.onMessage("load-danmaku", (data) => {
     let p = match[1].split(",");
     let colorVal = parseInt(p[3]);
     if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
-    let danmakuSize = parseInt(p[2]) || currentFontSize;
+    let danmakuSize = parseInt(p[2]) || 25;
     list.push({
       t: parseFloat(p[0]),
       m: parseInt(p[1]),
@@ -210,9 +207,8 @@ iina.onMessage("load-danmaku", (data) => {
 });
 
 iina.onMessage("resize", () => {
-  updateGlobalFontSize();
   updateLanes();
-  
+
   activeDanmaku.forEach(item => {
     if (item.type === 'fixed') {
       const winW = window.innerWidth;
@@ -248,10 +244,12 @@ iina.onMessage("set-opacity", (data) => {
   });
 });
 
-iina.onMessage("set-fontsize", (data) => {
-  currentFontSize = data.size;
-  updateGlobalFontSize();
+iina.onMessage("set-fontscale", (data) => {
+  fontScale = data.scale;
   updateLanes();
+  container.querySelectorAll('.dm-item').forEach(el => {
+    el.style.fontSize = (el.dataset.size * fontScale / _refWidth * 100).toFixed(4) + 'vw';
+  });
 });
 
 iina.onMessage("set-scroll-duration", (data) => {
@@ -272,11 +270,10 @@ iina.onMessage("block-type", (data) => {
   window._blockBottom = data.blockBottom;
 });
 
-updateGlobalFontSize();
 updateLanes();
 
 window.addEventListener("resize", () => {
-  updateGlobalFontSize();
+  updateLanes();
   iina.postMessage("resize", {});
 });
 setInterval(() => iina.postMessage("overlay-ready", {}), 300);
