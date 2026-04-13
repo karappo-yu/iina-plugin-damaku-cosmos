@@ -34,7 +34,7 @@ function updateLanes() {
   const refScale = winW / _refWidth;
   const laneHeight = currentFontSize * refScale * 1.15;
   
-  const newMaxLanes = Math.max(1, Math.floor((winH * 0.95) / laneHeight));
+  const newMaxLanes = Math.max(1, Math.floor(winH / laneHeight));
   
   if (newMaxLanes !== maxLanes) {
     maxLanes = newMaxLanes;
