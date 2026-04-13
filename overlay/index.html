@@ -1,21 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-
 <head>
   <meta charset="UTF-8" />
-  <link rel="stylesheet" href="../node_modules/comment-core-library/dist/css/style.css" />
+  <!-- 完全移除了臃肿的 CCL 依赖，变成一个极其纯粹的渲染容器 -->
   <link rel="stylesheet" href="index.css" />
-  <script src="../node_modules/comment-core-library/dist/CommentCoreLibrary.js"></script>
-  <title>Danmaku Overlay</title>
+  <title>Danmaku Cosmos Overlay</title>
 </head>
-
 <body>
-  <div id="danmaku-container">
-    <div class="m20 abp" id="player">
-      <div id="commentCanvas" class="container"></div>
-    </div>
-  </div>
+  <div id="danmaku-container"></div>
   <script src="index.js"></script>
 </body>
-
 </html>

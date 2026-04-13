@@ -2,6 +2,15 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* 全局暂停控制开关，一键冻结所有弹幕 */
+  --play-state: running; 
+}
+
+body.is-paused {
+  --play-state: paused;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -17,17 +26,61 @@ html, body {
 #danmaku-container {
   width: 100%;
   height: 100%;
+  position: relative;
+}
+
+/* 弹幕的基础艺术修养：日系字体 + 粗重黑边 */
+.dm-item {
   position: absolute;
-  top: 0;
+  white-space: nowrap;
+  font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Meiryo', sans-serif;
+  font-weight: 700;
+  text-shadow: 
+    1.5px 1.5px 0 #000, 
+    -1.5px -1.5px 0 #000, 
+    1.5px -1.5px 0 #000, 
+    -1.5px 1.5px 0 #000, 
+    0px 0px 4px rgba(0,0,0,0.8);
+  will-change: transform;
+  /* 绑定全局暂停变量 */
+  animation-play-state: var(--play-state) !important;
+}
+
+/* Z-Index 10: 滚动吐槽，最底层 */
+.dm-scroll {
+  z-index: 10;
   left: 0;
+  /* 使用 CSS 变量注入动态起点和终点，实现无缝缩放 */
+  animation: scroll-anim var(--dur) linear forwards;
+  animation-delay: var(--delay, 0ms);
 }
 
-#player {
-  width: 100%;
-  height: 100%;
+/* Z-Index 20: 底部说明 */
+.dm-bottom {
+  z-index: 20;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: fixed-anim var(--dur) linear forwards;
+  animation-delay: var(--delay, 0ms);
 }
 
-#commentCanvas {
-  width: 100%;
-  height: 100%;
+/* Z-Index 30: 顶部字幕，最顶层不可遮挡 */
+.dm-top {
+  z-index: 30;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: fixed-anim var(--dur) linear forwards;
+  animation-delay: var(--delay, 0ms);
+}
+
+/* 核心动画引擎：全程 GPU 加速 */
+@keyframes scroll-anim {
+  from { transform: translateX(var(--start-x)); }
+  to   { transform: translateX(var(--end-x)); }
+}
+
+@keyframes fixed-anim {
+  0%    { opacity: var(--final-opacity); }
+  99.9% { opacity: var(--final-opacity); }
+  100%  { opacity: 0; visibility: hidden; }
 }

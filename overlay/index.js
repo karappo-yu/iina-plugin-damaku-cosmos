@@ -1,443 +1,277 @@
-var cm = null;
-var danmakuVisible = true;
-var currentOpacity = 0.7;
-var isPaused = false;
-var readyTimer = null;
-var cmTime = 0;
-var scrollDuration = 8000;
-var scrollLanes = 500;
-var fixedMaxWidthRatio = 0.8;
-var seekThreshold = 5.5;
-var pressureSafeLimit = 30;
-var pressureDecayRate = 0.005;
-var pressureHardFloor = 0.35;
-var _lastTimeUpdateMs = 0;
-var _animFrameId = null;
+const container = document.getElementById('danmaku-container');
 
-var _nicoFontFamily = "'Hiragino Sans','Hiragino Kaku Gothic ProN','Noto Sans JP','Yu Gothic','Meiryo','MS Gothic','MS Mincho',SimHei,SimSun,monospace";
-var _refWidth = 1920;
+// --- 引擎状态 ---
+let allDanmaku = [];
+let activeDanmaku = new Set();
+let currentIndex = 0;
+let lastTime = 0;
+let isPaused = false;
 
-function refToVw(px) {
-  return (px / _refWidth * 100).toFixed(4) + "vw";
+// --- 动态参数 ---
+let danmakuVisible = true;
+let currentOpacity = 0.8;
+let scrollDuration = 8000;
+let fixedDuration = 4000;
+let currentFontSize = 25; 
+const _refWidth = 1920; 
+
+// --- 动态轨道控制 ---
+let maxLanes = 0;
+let scrollLanes = []; 
+let topLanes = [];
+let bottomLanes = [];
+
+// 彻底重置轨道状态，防止跳转进度后的时间戳污染
+function resetLaneData() {
+  scrollLanes = new Array(maxLanes).fill(0);
+  topLanes = new Array(maxLanes).fill(0);
+  bottomLanes = new Array(maxLanes).fill(0);
 }
 
-function refToActualPx(px) {
-  var w = cm ? cm.width : (window.innerWidth || _refWidth);
-  return px / _refWidth * w;
-}
-
-function buildCmtCSS(fontSize) {
-  var css = ".cmt{font-family:" + _nicoFontFamily + " !important;white-space:pre !important;}";
-  if (fontSize) {
-    css += ".cmt{font-size:" + refToVw(fontSize) + " !important;}";
+function updateLanes() {
+  const winH = window.innerHeight;
+  const winW = window.innerWidth;
+  const refScale = winW / _refWidth;
+  const laneHeight = currentFontSize * refScale * 1.15;
+  
+  const newMaxLanes = Math.max(1, Math.floor((winH * 0.95) / laneHeight));
+  
+  if (newMaxLanes !== maxLanes) {
+    maxLanes = newMaxLanes;
+    resetLaneData();
   }
-  return css;
 }
 
-function hexToString(hex) {
-  return decodeURIComponent("%" + hex.match(/.{1,2}/g).join("%"));
+function updateGlobalFontSize() {
+  const winW = window.innerWidth;
+  const fontSizeVw = (currentFontSize / _refWidth * 100).toFixed(4);
+  document.documentElement.style.setProperty('--global-fs', `${fontSizeVw}vw`);
 }
 
-function getCurrentPlaybackTime() {
-  if (isPaused || _lastTimeUpdateMs === 0) return cmTime;
-  var delta = (performance.now() - _lastTimeUpdateMs) / 1000;
-  return cmTime + delta;
-}
-
-function patchColorSetter() {
-  var origDescriptor = Object.getOwnPropertyDescriptor(CoreComment.prototype, "color");
-  if (!origDescriptor || !origDescriptor.set) return;
-
-  Object.defineProperty(CoreComment.prototype, "color", {
-    get: origDescriptor.get,
-    set: function (c) {
-      if (c < 0) {
-        c = (c >>> 0) & 0xFFFFFF;
-      }
-      origDescriptor.set.call(this, c);
-    },
-    enumerable: true,
-    configurable: true
-  });
-}
-
-function patchScrollDuration() {
-  var origInit = ScrollComment.prototype.init;
-  ScrollComment.prototype.init = function (recycle) {
-    origInit.call(this, recycle);
-    this.dur = scrollDuration;
-    this.ttl = scrollDuration;
-  };
-
-  var origCssInit = CssScrollComment.prototype.init;
-  CssScrollComment.prototype.init = function (recycle) {
-    origCssInit.call(this, recycle);
-    this.dur = scrollDuration;
-    this.ttl = scrollDuration;
-    this.dom.style.transition = "none";
-    this.dom.style.willChange = "transform";
-    this._dirtyCSS = false;
-  };
-
-  CssScrollComment.prototype.update = function () {
-    this._dirtyCSS = false;
-  };
-}
-
-function patchFixedCommentAutoSize() {
-  var _canvas = document.createElement("canvas");
-  var _ctx = _canvas.getContext("2d");
-
-  function getEffectiveRefSize(commentObj) {
-    var fontStyle = document.getElementById("dm-font-style");
-    if (fontStyle) {
-      var match = fontStyle.textContent.match(/font-size:\s*([\d.]+)vw/);
-      if (match) return parseFloat(match[1]) / 100 * _refWidth;
+function getFreeLane(lanesArr, textW, winW, durMs, videoTimeMs) {
+  // 增加随机起始偏移，让弹幕分布更散更自然
+  const startLane = Math.floor(Math.random() * Math.min(maxLanes, 8));
+  
+  for (let j = 0; j < maxLanes; j++) {
+    let i = (startLane + j) % maxLanes;
+    // 只有当轨道空闲时间小于当前视频时间，才分配此轨道
+    if (lanesArr[i] <= videoTimeMs) {
+      const speed = (winW + textW) / durMs;
+      const clearTime = textW > 0 ? (textW / speed) : durMs;
+      // 这里的 300ms 缓冲非常关键
+      lanesArr[i] = videoTimeMs + clearTime + 300; 
+      return i;
     }
-    return commentObj.size || 25;
+  }
+  // 全满时的保底逻辑
+  let earliestLane = 0;
+  for (let i = 1; i < maxLanes; i++) {
+    if (lanesArr[i] < lanesArr[earliestLane]) earliestLane = i;
+  }
+  return earliestLane;
+}
+
+function createDanmaku(d, seekTime = null) {
+  if (!danmakuVisible) return;
+
+  const isScroll = d.m >= 1 && d.m <= 3;
+  const isBottom = d.m === 4;
+  const isTop = d.m === 5;
+  
+  // 检查屏蔽类型
+  if (isScroll && window._blockScroll) return;
+  if (isTop && window._blockTop) return;
+  if (isBottom && window._blockBottom) return;
+  const durMs = isScroll ? scrollDuration : fixedDuration;
+
+  // 使用传入的当前时间或弹幕自身时间戳
+  const videoTimeMs = d.t * 1000;
+  const elapsedMs = seekTime !== null ? (seekTime - d.t) * 1000 : 0;
+  
+  if (elapsedMs >= durMs || elapsedMs < 0) return;
+
+  const el = document.createElement('div');
+  el.className = 'dm-item';
+  el.textContent = d.text;
+  el.style.color = d.c;
+  el.style.opacity = currentOpacity;
+  el.style.fontSize = 'var(--global-fs)';
+
+  if (isScroll) el.classList.add('dm-scroll');
+  else if (isBottom) el.classList.add('dm-bottom');
+  else if (isTop) el.classList.add('dm-top');
+
+  container.appendChild(el);
+
+  const textW = el.offsetWidth;
+  const winW = window.innerWidth;
+  
+  const lanesRef = isScroll ? scrollLanes : (isTop ? topLanes : bottomLanes);
+  const lane = getFreeLane(lanesRef, textW, winW, durMs, videoTimeMs);
+  
+  const laneHeightVh = (95 / maxLanes); 
+  const jitter = (Math.random() - 0.5) * (laneHeightVh * 0.25);
+
+  if (isScroll || isTop) {
+    el.style.top = `${lane * laneHeightVh + jitter}vh`;
+  } else if (isBottom) {
+    el.style.bottom = `${lane * laneHeightVh + jitter + 2}vh`; 
   }
 
-  var origCoreInit = CoreComment.prototype.init;
-  CoreComment.prototype.init = function (recycle) {
-    origCoreInit.call(this, recycle);
+  el.style.setProperty('--dur', `${durMs}ms`);
+  el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
-    if (this.mode === 5) {
-      this.dom.style.zIndex = 30;
-    } else if (this.mode === 4) {
-      this.dom.style.zIndex = 20;
+  if (isScroll) {
+    el.style.setProperty('--start-x', `100vw`);
+    el.style.setProperty('--end-x', `-100%`);
+  } else {
+    const maxW = winW * 0.95;
+    if (textW > maxW) {
+      el.style.transform = `translateX(-50%) scaleX(${maxW / textW})`;
     } else {
-      this.dom.style.zIndex = 10;
+      el.style.transform = `translateX(-50%)`;
     }
-
-    if (this.mode !== 4 && this.mode !== 5) return;
-    if (!this.dom || !this.parent) return;
-    var containerWidth = this.parent.width;
-    if (containerWidth <= 0) return;
-    var maxWidth = containerWidth * fixedMaxWidthRatio;
-    var refSize = getEffectiveRefSize(this);
-    var actualFontSize = refToActualPx(refSize);
-    _ctx.font = actualFontSize + "px " + _nicoFontFamily;
-    var textWidth = _ctx.measureText(this.text || "").width;
-    if (textWidth > maxWidth && textWidth > 0) {
-      var newRefSize = Math.max(10, Math.floor(refSize * maxWidth / textWidth));
-      this.dom.style.setProperty("font-size", refToVw(newRefSize), "important");
-      this.dom.style.setProperty("line-height", refToVw(newRefSize), "important");
-    }
-  };
-}
-
-function updateDanmakuPositions() {
-  if (!cm || !danmakuVisible) return;
-
-  var containerWidth = cm.width;
-  if (containerWidth <= 0) return;
-
-  var currentTime = getCurrentPlaybackTime();
-  var durSec = scrollDuration / 1000;
-
-  for (var i = cm.runline.length - 1; i >= 0; i--) {
-    var cmt = cm.runline[i];
-
-    if (cmt.mode === 4 || cmt.mode === 5) continue;
-
-    var elapsed = currentTime - cmt.stime;
-    if (elapsed < 0) continue;
-
-    var progress = elapsed / durSec;
-    if (progress >= 1) {
-      cmt.finish();
-      cm.runline.splice(i, 1);
-      continue;
-    }
-
-    var textWidth = cmt.dom.offsetWidth;
-    if (textWidth <= 0) continue;
-
-    var totalDistance = containerWidth + textWidth;
-    var currentX = containerWidth - progress * totalDistance;
-
-    cmt.dom.style.left = currentX + "px";
-    cmt._x = currentX;
   }
-}
 
-function renderLoop() {
-  updateDanmakuPositions();
-  _animFrameId = requestAnimationFrame(renderLoop);
-}
+  const item = { el, d, type: isScroll ? 'scroll' : 'fixed' };
+  activeDanmaku.add(item);
 
-function initCommentManager() {
-  var container = document.getElementById("commentCanvas");
-  if (!container) return;
-
-  patchColorSetter();
-  patchScrollDuration();
-  patchFixedCommentAutoSize();
-
-  cm = new CommentManager(container);
-  cm.init();
-  cm.start();
-
-  cm.addEventListener("enterComment", function (cmt) {
-    var activeCount = cm.runline.length;
-    if (activeCount <= pressureSafeLimit) return;
-    var baseOpacity = cmt._alpha * cm.options.global.opacity;
-    var dynamicOpacity = baseOpacity - ((activeCount - pressureSafeLimit) * pressureDecayRate);
-    var finalOpacity = Math.max(dynamicOpacity, pressureHardFloor * cm.options.global.opacity);
-    cmt.dom.style.opacity = finalOpacity + "";
-  });
-
-  injectFontStyle();
-  _animFrameId = requestAnimationFrame(renderLoop);
-}
-
-function injectFontStyle() {
-  var old = document.getElementById("dm-font-style");
-  if (old) old.remove();
-
-  var style = document.createElement("style");
-  style.id = "dm-font-style";
-  style.type = "text/css";
-  style.innerHTML = buildCmtCSS();
-  document.getElementsByTagName("head")[0].appendChild(style);
-}
-
-function loadDanmakuFromHex(hexString) {
-  if (!cm) initCommentManager();
-  if (!cm) return;
-
-  var xmlString = hexToString(hexString);
-
-  if (window._provider && window._provider instanceof CommentProvider) {
-    window._provider.destroy();
-  }
-  window._provider = new CommentProvider();
-  cm.clear();
-  window._provider.addTarget(cm);
-  cm.setBounds();
-  cm.init();
-  cm.start();
-
-  window._provider.addStaticSource(
-    Promise.resolve(xmlString),
-    CommentProvider.SOURCE_TEXT
-  ).addParser(
-    new BilibiliFormat.TextParser(),
-    CommentProvider.SOURCE_TEXT
-  );
-
-  window._provider.start().then(function () {
-    cm.start();
-    iina.postMessage("danmaku-loaded", { count: cm.timeline.length });
-  }).catch(function (e) {
-    iina.postMessage("danmaku-error", { message: e.message || "Provider error" });
+  el.addEventListener('animationend', () => {
+    el.remove();
+    activeDanmaku.delete(item);
   });
 }
 
-function clearDanmaku() {
-  if (window._provider && window._provider instanceof CommentProvider) {
-    window._provider.destroy();
-    window._provider = null;
+function handleSeek(timeSec) {
+  container.innerHTML = '';
+  activeDanmaku.clear();
+  
+  // 修复核心：每次 Seek 必须重置所有轨道的时间戳，否则会发生堆叠
+  resetLaneData();
+  updateLanes(); 
+  
+  const durSec = Math.max(scrollDuration, fixedDuration) / 1000;
+  currentIndex = allDanmaku.findIndex(d => d.t >= timeSec - durSec);
+  if (currentIndex === -1) currentIndex = 0;
+
+  let tempIndex = currentIndex;
+  while (tempIndex < allDanmaku.length && allDanmaku[tempIndex].t <= timeSec) {
+    const d = allDanmaku[tempIndex];
+    const typeDur = (d.m >= 1 && d.m <= 3) ? scrollDuration : fixedDuration;
+    if (timeSec - d.t < typeDur / 1000) {
+      createDanmaku(d, timeSec); 
+    }
+    tempIndex++;
   }
-  if (!cm) return;
-  cm.clear();
-  cm.stop();
-  cm.timeline = [];
-  cm.position = 0;
-  cm._lastPosition = 0;
+  currentIndex = tempIndex;
 }
 
-function seekToTime(newTimeMs) {
-  if (!cm || !cm.timeline || cm.timeline.length === 0) return;
-
-  cm.clear();
-  cm.seek(newTimeMs);
-
-  var newTimeSec = newTimeMs / 1000;
-  var durSec = scrollDuration / 1000;
-
-  for (var i = 0; i < cm.timeline.length; i++) {
-    var cmtData = cm.timeline[i];
-    if (cmtData.stime > newTimeSec) break;
-    var cmtEnd = cmtData.stime + durSec;
-    if (cmtEnd <= newTimeSec) continue;
-    if (!cm.validate(cmtData)) continue;
-
-    var elapsed = newTimeSec - cmtData.stime;
-    var remaining = durSec - elapsed;
-    if (remaining <= 0) continue;
-
-    var cmt = cm.factory.create(cm, cmtData);
-    cm._allocateSpace(cmt);
-    cmt.ttl = remaining * 1000;
-    cmt.dur = scrollDuration;
-    cm.runline.push(cmt);
+iina.onMessage("time-update", (data) => {
+  let t = data.time;
+  // 正常播放时，如果时间跳跃超过 1.5 秒，视为手动调整进度
+  if (Math.abs(t - lastTime) > 1.5) {
+    handleSeek(t);
+  } else if (!isPaused) {
+    while (currentIndex < allDanmaku.length && allDanmaku[currentIndex].t <= t) {
+      createDanmaku(allDanmaku[currentIndex]);
+      currentIndex++;
+    }
   }
-}
-
-iina.onMessage("apply-settings", function (data) {
-  if (data.opacity !== undefined) {
-    currentOpacity = data.opacity;
-    if (cm) cm.options.global.opacity = currentOpacity;
-  }
-  if (data.scrollDuration !== undefined) {
-    scrollDuration = data.scrollDuration;
-  }
-  if (data.scrollLanes !== undefined) {
-    scrollLanes = data.scrollLanes;
-    if (cm) cm.options.scroll.scale = scrollLanes / 680;
-  }
-  if (data.pressureSafeLimit !== undefined) pressureSafeLimit = data.pressureSafeLimit;
-  if (data.pressureDecayRate !== undefined) pressureDecayRate = data.pressureDecayRate;
-  if (data.pressureHardFloor !== undefined) pressureHardFloor = data.pressureHardFloor;
-  if (data.fontSize !== undefined && cm) {
-    var old = document.getElementById("dm-font-style");
-    if (old) old.remove();
-    var style = document.createElement("style");
-    style.id = "dm-font-style";
-    style.type = "text/css";
-    style.innerHTML = buildCmtCSS(data.fontSize);
-    document.getElementsByTagName("head")[0].appendChild(style);
-  }
+  lastTime = t;
 });
 
-iina.onMessage("load-danmaku", function (data) {
-  if (data.opacity !== undefined) {
-    currentOpacity = data.opacity;
+iina.onMessage("load-danmaku", (data) => {
+  if (data.fontSize) currentFontSize = data.fontSize;
+  if (data.scrollDuration) scrollDuration = data.scrollDuration;
+  if (data.opacity) currentOpacity = data.opacity;
+  updateGlobalFontSize();
+  updateLanes();
+  
+  let xmlStr = decodeURIComponent("%" + data.xmlContent.match(/.{1,2}/g).join("%"));
+  const regex = /<d p="([^"]+)">([\s\S]*?)<\/d>/g;
+  let list = [];
+  let match;
+  while ((match = regex.exec(xmlStr)) !== null) {
+    let p = match[1].split(",");
+    let colorVal = parseInt(p[3]);
+    if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
+    list.push({
+      t: parseFloat(p[0]),
+      m: parseInt(p[1]),
+      c: "#" + colorVal.toString(16).padStart(6, '0'),
+      text: match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    });
   }
-  if (data.scrollDuration !== undefined) {
-    scrollDuration = data.scrollDuration;
-  }
-  if (data.scrollLanes !== undefined) {
-    scrollLanes = data.scrollLanes;
-  }
-  loadDanmakuFromHex(data.xmlContent);
-  if (cm && currentOpacity !== undefined) {
-    cm.options.global.opacity = currentOpacity;
-  }
-  if (cm && scrollLanes !== undefined) {
-    cm.options.scroll.scale = scrollLanes / 680;
-  }
+  allDanmaku = list.sort((a, b) => a.t - b.t);
+  handleSeek(0);
+  iina.postMessage("danmaku-loaded", { count: allDanmaku.length });
 });
 
-iina.onMessage("clear-danmaku", function () {
-  clearDanmaku();
+iina.onMessage("resize", () => {
+  updateGlobalFontSize();
+  updateLanes();
+  
+  activeDanmaku.forEach(item => {
+    if (item.type === 'fixed') {
+      const winW = window.innerWidth;
+      const textW = item.el.offsetWidth;
+      const maxW = winW * 0.95;
+      if (textW > maxW) {
+        item.el.style.transform = `translateX(-50%) scaleX(${maxW / textW})`;
+      } else {
+        item.el.style.transform = `translateX(-50%)`;
+      }
+    }
+  });
 });
 
-iina.onMessage("time-update", function (data) {
-  if (!cm || !danmakuVisible) return;
-  var t = data.time;
-  if (Math.abs(cmTime - t) > seekThreshold) {
-    seekToTime(Math.floor(t * 1000));
-  }
-  cmTime = t;
-  _lastTimeUpdateMs = performance.now();
-  cm.time(Math.floor(t * 1000));
-});
-
-iina.onMessage("pause-state", function (data) {
+iina.onMessage("pause-state", (data) => {
   isPaused = data.paused;
-  if (!cm) return;
-  if (isPaused) {
-    cm.stop();
-  } else {
-    cm.start();
-    _lastTimeUpdateMs = performance.now();
-  }
+  document.body.classList.toggle('is-paused', isPaused);
 });
 
-iina.onMessage("toggle-danmaku", function (data) {
+iina.onMessage("toggle-danmaku", (data) => {
   danmakuVisible = data.enabled;
-  var container = document.getElementById("danmaku-container");
-  if (container) container.style.display = danmakuVisible ? "" : "none";
-  if (!danmakuVisible && cm) cm.clear();
+  container.style.display = danmakuVisible ? '' : 'none';
+  if (!danmakuVisible) {
+    container.innerHTML = '';
+    activeDanmaku.clear();
+  }
 });
 
-iina.onMessage("set-opacity", function (data) {
+iina.onMessage("set-opacity", (data) => {
   currentOpacity = data.opacity;
-  if (cm) cm.options.global.opacity = data.opacity;
 });
 
-iina.onMessage("set-scroll-duration", function (data) {
+iina.onMessage("set-fontsize", (data) => {
+  currentFontSize = data.size;
+  updateGlobalFontSize();
+  updateLanes();
+});
+
+iina.onMessage("set-scroll-duration", (data) => {
   scrollDuration = data.duration;
-  if (cm) {
-    cm.clear();
-  }
 });
 
-iina.onMessage("set-scroll-lanes", function (data) {
-  scrollLanes = data.lanes;
-  if (cm) {
-    cm.options.scroll.scale = scrollLanes / 680;
-  }
+iina.onMessage("clear-danmaku", () => {
+  container.innerHTML = '';
+  activeDanmaku.clear();
+  allDanmaku = [];
+  currentIndex = 0;
 });
 
-iina.onMessage("set-pressure-safe", function (data) {
-  pressureSafeLimit = data.value;
+iina.onMessage("block-type", (data) => {
+  // 简单实现：在 createDanmaku 中检查
+  window._blockScroll = data.blockScroll;
+  window._blockTop = data.blockTop;
+  window._blockBottom = data.blockBottom;
 });
 
-iina.onMessage("set-pressure-decay", function (data) {
-  pressureDecayRate = data.value;
+updateGlobalFontSize();
+updateLanes();
+
+window.addEventListener("resize", () => {
+  updateGlobalFontSize();
+  iina.postMessage("resize", {});
 });
-
-iina.onMessage("set-pressure-floor", function (data) {
-  pressureHardFloor = data.value;
-});
-
-iina.onMessage("set-fontsize", function (data) {
-  if (!cm) return;
-  var old = document.getElementById("dm-font-style");
-  if (old) old.remove();
-
-  var style = document.createElement("style");
-  style.id = "dm-font-style";
-  style.type = "text/css";
-  style.innerHTML = buildCmtCSS(data.size);
-  document.getElementsByTagName("head")[0].appendChild(style);
-});
-
-iina.onMessage("block-type", function (data) {
-  if (!cm) return;
-  cm.filter.allowUnknownTypes = false;
-  cm.filter.allowTypes[5] = !data.blockTop;
-  cm.filter.allowTypes[4] = !data.blockBottom;
-  cm.filter.allowTypes[1] = !data.blockScroll;
-  cm.filter.allowTypes[2] = !data.blockScroll;
-});
-
-iina.onMessage("resize", function () {
-  if (!cm) return;
-  cm.setBounds();
-});
-
-iina.onMessage("ack", function () {
-  if (readyTimer) {
-    clearInterval(readyTimer);
-    readyTimer = null;
-  }
-});
-
-window.addEventListener("resize", function () {
-  if (!cm) return;
-  cm.setBounds();
-});
-
-document.addEventListener("visibilitychange", function () {
-  if (!cm) return;
-  if (document.visibilityState === "visible") {
-    cm.start();
-    cm.clear();
-    _lastTimeUpdateMs = performance.now();
-  } else {
-    cm.stop();
-    cm.clear();
-  }
-});
-
-initCommentManager();
-
-readyTimer = setInterval(function () {
-  iina.postMessage("overlay-ready", {});
-}, 300);
-
-iina.postMessage("overlay-ready", {});
+setInterval(() => iina.postMessage("overlay-ready", {}), 300);
