@@ -45,22 +45,29 @@ function updateLanes() {
 
 
 
-function getFreeLane(lanesArr, textW, winW, durMs, videoTimeMs) {
-  // 增加随机起始偏移，让弹幕分布更散更自然
+function getFreeLane(lanesArr, textW, winW, durMs, videoTimeMs, danmakuSize) {
+  const lanesNeeded = danmakuSize / 25;
   const startLane = Math.floor(Math.random() * Math.min(maxLanes, 8));
-  
+
   for (let j = 0; j < maxLanes; j++) {
     let i = (startLane + j) % maxLanes;
-    // 只有当轨道空闲时间小于当前视频时间，才分配此轨道
-    if (lanesArr[i] <= videoTimeMs) {
+    let enoughSpace = true;
+    for (let k = 0; k < Math.ceil(lanesNeeded); k++) {
+      if (i + k >= maxLanes || lanesArr[i + k] > videoTimeMs) {
+        enoughSpace = false;
+        break;
+      }
+    }
+    if (enoughSpace) {
       const speed = (winW + textW) / durMs;
       const clearTime = textW > 0 ? (textW / speed) : durMs;
-      // 这里的 300ms 缓冲非常关键
-      lanesArr[i] = videoTimeMs + clearTime + 300; 
+      for (let k = 0; k < Math.ceil(lanesNeeded); k++) {
+        lanesArr[i + k] = videoTimeMs + clearTime + 300;
+      }
       return i;
     }
   }
-  // 全满时的保底逻辑
+
   let earliestLane = 0;
   for (let i = 1; i < maxLanes; i++) {
     if (lanesArr[i] < lanesArr[earliestLane]) earliestLane = i;
@@ -106,9 +113,9 @@ function createDanmaku(d, seekTime = null) {
   const winW = window.innerWidth;
   
   const lanesRef = isScroll ? scrollLanes : (isTop ? topLanes : bottomLanes);
-  const lane = getFreeLane(lanesRef, textW, winW, durMs, videoTimeMs);
+  const lane = getFreeLane(lanesRef, textW, winW, durMs, videoTimeMs, d.size);
   
-  const laneHeightVh = (95 / maxLanes); 
+  const laneHeightVh = (100 / maxLanes); 
   const jitter = (Math.random() - 0.5) * (laneHeightVh * 0.25);
 
   if (isScroll || isTop) {
