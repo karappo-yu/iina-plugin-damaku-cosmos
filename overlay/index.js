@@ -212,6 +212,13 @@ function createDanmaku(d, currentTime = null) {
 
   container.appendChild(el);
 
+  // 生命周期过半后降低优先级，让新弹幕可以覆盖
+  if (isBottom || isTop) {
+    setTimeout(function() {
+      el.classList.add('priority-low');
+    }, durMs / 2);
+  }
+
   // 利用缓存跳过耗时的 layout reflow
   if (d._textW === undefined) {
     d._textW = el.offsetWidth;

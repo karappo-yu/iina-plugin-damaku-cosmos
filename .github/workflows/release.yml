@@ -2,8 +2,6 @@ name: Release Package
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -13,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          node-version: '20'
 
       - name: Package Plugin
         run: |
@@ -36,7 +36,7 @@ jobs:
           ls -lh dist/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/danmaku-cosmos.iinaplgz
           generate_release_notes: true

@@ -73,6 +73,16 @@ html, body {
   animation-delay: var(--delay, 0ms);
 }
 
+/* 生命周期后半段降级优先级：底部从 20 降到低于滚动弹幕的 10 */
+.dm-bottom.priority-low {
+  z-index: 10;
+}
+
+/* 生命周期后半段降级优先级：顶部从 30 降到低于滚动弹幕的 10 */
+.dm-top.priority-low {
+  z-index: 10;
+}
+
 /* 核心动画引擎：全程 GPU 加速 */
 @keyframes scroll-anim {
   from { transform: translateX(var(--start-x)); }
