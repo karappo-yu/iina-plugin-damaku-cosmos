@@ -14,6 +14,7 @@ var currentFontScale = preferences.get("danmakuFontScale");
 var currentSpeed = preferences.get("danmakuSpeed");
 var currentScrollDuration = preferences.get("scrollDuration");
 var currentMaxPerSec = preferences.get("maxDanmakuPerSecond");
+var currentBlockForceLane = preferences.get("blockForceLane");
 var overlayReady = false;
 var pendingDanmaku = null;
 var currentVideoUrl = null;
@@ -154,6 +155,7 @@ function markOverlayReady() {
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
     maxPerSec: currentMaxPerSec,
+    blockForceLane: currentBlockForceLane,
   });
 
   if (pendingDanmaku) {
@@ -250,6 +252,13 @@ function registerSidebarHandlers() {
     overlay.postMessage("block-type", data);
   });
 
+  sidebar.onMessage("block-force-lane", function (data) {
+    currentBlockForceLane = data.blockForceLane;
+    preferences.set("blockForceLane", currentBlockForceLane);
+    preferences.sync();
+    overlay.postMessage("block-force-lane", { blockForceLane: currentBlockForceLane });
+  });
+
   sidebar.onMessage("request-state", function () {
     sidebar.postMessage("danmaku-state", {
       enabled: danmakuEnabled,
@@ -258,6 +267,7 @@ function registerSidebarHandlers() {
       speed: currentSpeed,
       scrollDuration: currentScrollDuration,
       maxPerSec: currentMaxPerSec,
+      blockForceLane: currentBlockForceLane,
     });
   });
 }

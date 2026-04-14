@@ -14,6 +14,7 @@ let scrollDuration = 4000; // Nico 经典滚动基准时间为 4s
 let fixedDuration = 4000;
 let fontScale = 1.0;
 let maxPerSec = 20; // 限流：每秒最大弹幕数
+let blockForceLane = false; // 过滤强制分配轨道的弹幕（溢出弹幕）
 const _refWidth = 1920; 
 
 // --- Nico 专属颜色映射表 (Niconico Color Dict) ---
@@ -48,6 +49,7 @@ function clearDanmakuCaches() {
   allDanmaku.forEach(d => {
     d._lane = undefined;
     d._textW = undefined;
+    d._forced = undefined;
   });
 }
 
@@ -108,11 +110,11 @@ function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeede
           lanesArr[i + k] = { tailEnterTime, tailReachOneThirdTime };
         }
       }
-      return i;
+      return { lane: i, forced: false };
     }
   }
 
-  // 2. 如果找不到完全符合条件的，寻找最先释放入口的轨道 (强制覆盖)
+  // 2. 如果找不到完全符合条件的，寻找最先释放入口的轨道 (暂不更新，等调用方决定)
   let earliestLane = 0;
   let earliestTime = Infinity;
   for (let i = 0; i < validLaneCount; i++) {
@@ -127,14 +129,8 @@ function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeede
       earliestLane = i;
     }
   }
-
-  // 更新占用的轨道状态
-  for (let k = 0; k < lanesNeeded; k++) {
-    if (earliestLane + k < maxLanes) {
-      lanesArr[earliestLane + k] = { tailEnterTime, tailReachOneThirdTime };
-    }
-  }
-  return earliestLane;
+  // 返回强制分配标记，但不更新轨道状态
+  return { lane: earliestLane, forced: true };
 }
 
 /**
@@ -156,7 +152,7 @@ function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
       for (let k = 0; k < lanesNeeded; k++) {
         if (i + k < maxLanes) lanesArr[i + k] = { leaveScreenTime };
       }
-      return i;
+      return { lane: i, forced: false };
     }
   }
 
@@ -178,7 +174,7 @@ function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
   for (let k = 0; k < lanesNeeded; k++) {
     if (earliestLane + k < maxLanes) lanesArr[earliestLane + k] = { leaveScreenTime };
   }
-  return earliestLane;
+  return { lane: earliestLane, forced: true };
 }
 
 // --- 数据端限流：按时间窗口过滤 ---
@@ -262,6 +258,11 @@ function createDanmaku(d, currentTime = null) {
   // 核心分配逻辑分流，带有轨道记忆
   if (lane !== undefined && lane < maxLanes) {
     // 如果有记忆的轨道，则直接使用，但依然要更新全局轨道占用状态
+    // 如果该弹幕之前是强制分配的且开启了过滤，则跳过
+    if (blockForceLane && d._forced) {
+      el.remove();
+      return;
+    }
     if (isScroll) {
       const speed = (winW + textW) / durMs;
       const tailEnterTime = videoTimeMs + (textW / speed) + 100;
@@ -282,14 +283,43 @@ function createDanmaku(d, currentTime = null) {
     }
   } else {
     // 如果没有记忆，则重新计算并缓存
+    let result;
     if (isScroll) {
-      lane = getFreeScrollLane(scrollLanes, textW, winW, durMs, videoTimeMs, lanesNeeded);
+      result = getFreeScrollLane(scrollLanes, textW, winW, durMs, videoTimeMs, lanesNeeded);
     } else if (isTop) {
-      lane = getFreeFixedLane(topLanes, durMs, videoTimeMs, lanesNeeded);
+      result = getFreeFixedLane(topLanes, durMs, videoTimeMs, lanesNeeded);
     } else if (isBottom) {
-      lane = getFreeFixedLane(bottomLanes, durMs, videoTimeMs, lanesNeeded);
+      result = getFreeFixedLane(bottomLanes, durMs, videoTimeMs, lanesNeeded);
     }
-    d._lane = lane;
+    if (result) {
+      // 过滤强制分配轨道的溢出弹幕
+      if (blockForceLane && result.forced) {
+        el.remove();
+        return;
+      }
+      lane = result.lane;
+      d._lane = lane;
+      d._forced = result.forced;
+      // 更新轨道状态
+      if (isScroll) {
+        const speed = (winW + textW) / durMs;
+        const tailEnterTime = videoTimeMs + (textW / speed) + 100;
+        const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
+        for (let k = 0; k < lanesNeeded; k++) {
+          if (lane + k < maxLanes) {
+            scrollLanes[lane + k] = { tailEnterTime, tailReachOneThirdTime };
+          }
+        }
+      } else if (isTop) {
+        for (let k = 0; k < lanesNeeded; k++) {
+          if (lane + k < maxLanes) topLanes[lane + k] = { leaveScreenTime: videoTimeMs + durMs };
+        }
+      } else if (isBottom) {
+        for (let k = 0; k < lanesNeeded; k++) {
+          if (lane + k < maxLanes) bottomLanes[lane + k] = { leaveScreenTime: videoTimeMs + durMs };
+        }
+      }
+    }
   }
   
   const laneHeightVh = (100 / maxLanes);
@@ -511,6 +541,7 @@ iina.onMessage("apply-settings", (data) => {
   if (data.fontScale !== undefined) fontScale = data.fontScale;
   if (data.scrollDuration !== undefined) scrollDuration = data.scrollDuration;
   if (data.maxPerSec !== undefined) maxPerSec = data.maxPerSec;
+  if (data.blockForceLane !== undefined) blockForceLane = data.blockForceLane;
   updateLanes();
 });
 
@@ -518,6 +549,10 @@ iina.onMessage("block-type", (data) => {
   window._blockScroll = data.blockScroll;
   window._blockTop = data.blockTop;
   window._blockBottom = data.blockBottom;
+});
+
+iina.onMessage("block-force-lane", (data) => {
+  blockForceLane = data.blockForceLane;
 });
 
 updateLanes();

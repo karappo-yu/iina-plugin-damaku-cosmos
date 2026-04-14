@@ -8,6 +8,7 @@ var durationValue = document.getElementById("duration-value");
 var blockScroll = document.getElementById("block-scroll");
 var blockTop = document.getElementById("block-top");
 var blockBottom = document.getElementById("block-bottom");
+var blockForceLane = document.getElementById("block-force-lane");
 var maxPerSecSlider = document.getElementById("max-per-sec-slider");
 var maxPerSecValue = document.getElementById("max-per-sec-value");
 
@@ -21,6 +22,7 @@ var state = {
   blockScroll: false,
   blockTop: false,
   blockBottom: false,
+  blockForceLane: false,
 };
 
 var i18n = {
@@ -30,6 +32,7 @@ var i18n = {
     font_scale: "Font Scale",
     scroll_duration: "Scroll Duration",
     danmaku_block: "Block",
+    block_force_lane: "Block Overflow",
     block_scroll: "Block Scroll",
     block_top: "Block Top",
     block_bottom: "Block Bottom",
@@ -43,6 +46,7 @@ var i18n = {
     font_scale: "フォント倍率",
     scroll_duration: "スクロール時間",
     danmaku_block: "コメント屏蔽",
+    block_force_lane: "溢出屏蔽",
     block_scroll: "スクロール屏蔽",
     block_top: "上部屏蔽",
     block_bottom: "下部屏蔽",
@@ -56,6 +60,7 @@ var i18n = {
     font_scale: "字体缩放",
     scroll_duration: "滚动时长",
     danmaku_block: "弹幕屏蔽",
+    block_force_lane: "过滤溢出",
     block_scroll: "滚动屏蔽",
     block_top: "顶部屏蔽",
     block_bottom: "底部屏蔽",
@@ -96,6 +101,7 @@ function updateUI() {
   blockScroll.checked = state.blockScroll;
   blockTop.checked = state.blockTop;
   blockBottom.checked = state.blockBottom;
+  blockForceLane.checked = state.blockForceLane;
 }
 
 function sendBlockType() {
@@ -103,6 +109,9 @@ function sendBlockType() {
     blockScroll: blockScroll.checked,
     blockTop: blockTop.checked,
     blockBottom: blockBottom.checked,
+  });
+  iina.postMessage("block-force-lane", {
+    blockForceLane: blockForceLane.checked,
   });
 }
 
@@ -131,6 +140,7 @@ durationSlider.addEventListener("input", function () {
 blockScroll.addEventListener("change", sendBlockType);
 blockTop.addEventListener("change", sendBlockType);
 blockBottom.addEventListener("change", sendBlockType);
+blockForceLane.addEventListener("change", sendBlockType);
 
 maxPerSecSlider.addEventListener("input", function () {
   var lang = getBrowserLang();
@@ -147,6 +157,7 @@ iina.onMessage("danmaku-state", function (data) {
   if (data.speed !== undefined) state.speed = data.speed;
   if (data.scrollDuration !== undefined) state.scrollDuration = data.scrollDuration;
   if (data.maxPerSec !== undefined) state.maxPerSec = data.maxPerSec;
+  if (data.blockForceLane !== undefined) state.blockForceLane = data.blockForceLane;
   updateUI();
 });
 
