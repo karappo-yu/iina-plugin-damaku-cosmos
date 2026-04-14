@@ -218,7 +218,7 @@ function handleSeek(timeSec) {
   
   const durSec = Math.max(scrollDuration, fixedDuration) / 1000;
   currentIndex = allDanmaku.findIndex(d => d.t >= timeSec - durSec);
-  if (currentIndex === -1) currentIndex = 0;
+  if (currentIndex === -1) currentIndex = allDanmaku.length;
 
   let tempIndex = currentIndex;
   while (tempIndex < allDanmaku.length && allDanmaku[tempIndex].t <= timeSec) {
