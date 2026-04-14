@@ -1,8 +1,0 @@
-{
-  "name": "damaku-cosmos",
-  "version": "1.0.0",
-  "description": "IINA弹幕显示插件",
-  "dependencies": {
-    "comment-core-library": "^0.11.1"
-  }
-}
