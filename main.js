@@ -13,8 +13,8 @@ var currentOpacity = preferences.get("danmakuOpacity");
 var currentFontScale = preferences.get("danmakuFontScale");
 var currentSpeed = preferences.get("danmakuSpeed");
 var currentScrollDuration = preferences.get("scrollDuration");
-var currentMaxPerSec = preferences.get("maxDanmakuPerSecond");
 var currentBlockForceLane = preferences.get("blockForceLane");
+var currentMaxLaneRatio = preferences.get("maxLaneRatio") !== undefined ? preferences.get("maxLaneRatio") : 1.0;
 var overlayReady = false;
 var pendingDanmaku = null;
 var currentVideoUrl = null;
@@ -130,7 +130,6 @@ function loadDanmakuForVideo(url) {
     fontScale: currentFontScale,
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
-    maxPerSec: currentMaxPerSec,
   };
 
   if (overlayReady) {
@@ -154,8 +153,8 @@ function markOverlayReady() {
     fontScale: currentFontScale,
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
-    maxPerSec: currentMaxPerSec,
     blockForceLane: currentBlockForceLane,
+    maxLaneRatio: currentMaxLaneRatio,
   });
 
   if (pendingDanmaku) {
@@ -241,11 +240,10 @@ function registerSidebarHandlers() {
     overlay.postMessage("set-scroll-duration", { duration: data.duration });
   });
 
-  sidebar.onMessage("set-max-per-sec", function (data) {
-    currentMaxPerSec = data.maxPerSec;
-    preferences.set("maxDanmakuPerSecond", currentMaxPerSec);
+  sidebar.onMessage("set-lane-limit", function (data) {
+    preferences.set("maxLaneRatio", data.maxLaneRatio);
     preferences.sync();
-    overlay.postMessage("set-max-per-sec", { maxPerSec: data.maxPerSec });
+    overlay.postMessage("set-lane-limit", { maxLaneRatio: data.maxLaneRatio });
   });
 
   sidebar.onMessage("block-type", function (data) {
@@ -266,8 +264,8 @@ function registerSidebarHandlers() {
       fontScale: currentFontScale,
       speed: currentSpeed,
       scrollDuration: currentScrollDuration,
-      maxPerSec: currentMaxPerSec,
       blockForceLane: currentBlockForceLane,
+      maxLaneRatio: currentMaxLaneRatio,
     });
   });
 }
@@ -345,7 +343,6 @@ menu.addItem(
         fontScale: currentFontScale,
         speed: currentSpeed,
         scrollDuration: currentScrollDuration,
-        maxPerSec: currentMaxPerSec,
       });
       core.osd("已发送弹幕: " + path.split("/").pop());
       if (!danmakuEnabled) {

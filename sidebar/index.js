@@ -9,8 +9,8 @@ var blockScroll = document.getElementById("block-scroll");
 var blockTop = document.getElementById("block-top");
 var blockBottom = document.getElementById("block-bottom");
 var blockForceLane = document.getElementById("block-force-lane");
-var maxPerSecSlider = document.getElementById("max-per-sec-slider");
-var maxPerSecValue = document.getElementById("max-per-sec-value");
+var maxLaneSlider = document.getElementById("max-lane-slider");
+var maxLaneValue = document.getElementById("max-lane-value");
 
 var state = {
   enabled: true,
@@ -18,11 +18,11 @@ var state = {
   fontScale: 1.0,
   speed: 680,
   scrollDuration: 8000,
-  maxPerSec: 20,
   blockScroll: false,
   blockTop: false,
   blockBottom: false,
   blockForceLane: false,
+  maxLaneRatio: 1.0,
 };
 
 var i18n = {
@@ -36,9 +36,7 @@ var i18n = {
     block_scroll: "Block Scroll",
     block_top: "Block Top",
     block_bottom: "Block Bottom",
-    rate_limit: "Rate Limit",
-    rate_limit_hint: "Max danmaku per second, 0 = unlimited",
-    unlimited: "Unlimited"
+    lane_limit: "Lane Limit"
   },
   ja: {
     danmaku_visible: "コメント表示",
@@ -50,9 +48,7 @@ var i18n = {
     block_scroll: "スクロール屏蔽",
     block_top: "上部屏蔽",
     block_bottom: "下部屏蔽",
-    rate_limit: "コメントレート制限",
-    rate_limit_hint: "每秒最大コメント数、0 = 制限なし",
-    unlimited: "制限なし"
+    lane_limit: "軌道制限"
   },
   zh: {
     danmaku_visible: "弹幕显示",
@@ -64,9 +60,7 @@ var i18n = {
     block_scroll: "滚动屏蔽",
     block_top: "顶部屏蔽",
     block_bottom: "底部屏蔽",
-    rate_limit: "弹幕限流",
-    rate_limit_hint: "每秒最大弹幕数，0 = 不限",
-    unlimited: "不限"
+    lane_limit: "轨道限制"
   }
 };
 
@@ -87,8 +81,6 @@ function applyI18n() {
 }
 
 function updateUI() {
-  var lang = getBrowserLang();
-  var unlimitedText = i18n[lang].unlimited;
   toggleDanmaku.checked = state.enabled;
   opacitySlider.value = state.opacity;
   opacityValue.textContent = Math.round(state.opacity * 100) + "%";
@@ -96,8 +88,8 @@ function updateUI() {
   fontsizeValue.textContent = Math.round(state.fontScale * 100) + "%";
   durationSlider.value = state.scrollDuration;
   durationValue.textContent = (state.scrollDuration / 1000).toFixed(1) + "s";
-  maxPerSecSlider.value = state.maxPerSec;
-  maxPerSecValue.textContent = state.maxPerSec === 0 ? unlimitedText : state.maxPerSec + "/s";
+  maxLaneSlider.value = Math.round(state.maxLaneRatio * 100);
+  maxLaneValue.textContent = Math.round(state.maxLaneRatio * 100) + "%";
   blockScroll.checked = state.blockScroll;
   blockTop.checked = state.blockTop;
   blockBottom.checked = state.blockBottom;
@@ -142,12 +134,10 @@ blockTop.addEventListener("change", sendBlockType);
 blockBottom.addEventListener("change", sendBlockType);
 blockForceLane.addEventListener("change", sendBlockType);
 
-maxPerSecSlider.addEventListener("input", function () {
-  var lang = getBrowserLang();
-  var unlimitedText = i18n[lang].unlimited;
-  var val = parseInt(maxPerSecSlider.value, 10);
-  maxPerSecValue.textContent = val === 0 ? unlimitedText : val + "/s";
-  iina.postMessage("set-max-per-sec", { maxPerSec: val });
+maxLaneSlider.addEventListener("input", function () {
+  var val = parseInt(maxLaneSlider.value, 10) / 100;
+  maxLaneValue.textContent = Math.round(val * 100) + "%";
+  iina.postMessage("set-lane-limit", { maxLaneRatio: val });
 });
 
 iina.onMessage("danmaku-state", function (data) {
@@ -156,8 +146,8 @@ iina.onMessage("danmaku-state", function (data) {
   if (data.fontScale !== undefined) state.fontScale = data.fontScale;
   if (data.speed !== undefined) state.speed = data.speed;
   if (data.scrollDuration !== undefined) state.scrollDuration = data.scrollDuration;
-  if (data.maxPerSec !== undefined) state.maxPerSec = data.maxPerSec;
   if (data.blockForceLane !== undefined) state.blockForceLane = data.blockForceLane;
+  if (data.maxLaneRatio !== undefined) state.maxLaneRatio = data.maxLaneRatio;
   updateUI();
 });
 

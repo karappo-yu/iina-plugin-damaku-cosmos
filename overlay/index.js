@@ -13,8 +13,8 @@ let currentOpacity = 0.8;
 let scrollDuration = 4000; // Nico 经典滚动基准时间为 4s
 let fixedDuration = 4000;
 let fontScale = 1.0;
-let maxPerSec = 20; // 限流：每秒最大弹幕数
 let blockForceLane = false; // 过滤强制分配轨道的弹幕（溢出弹幕）
+let maxLaneRatio = 1.0; // 限制轨道数比例，1.0 = 全部轨道，0.5 = 只用上半部分
 const _refWidth = 1920; 
 
 // --- Nico 专属颜色映射表 (Niconico Color Dict) ---
@@ -81,7 +81,8 @@ function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeede
   // 当前弹幕尾部到达 1/3 处的时间 = 行驶 2/3 屏幕宽 + 弹幕宽度的耗时
   const tailReachOneThirdTime = currentTime + (2 * winW / 3 + textW) / speed;
 
-  const validLaneCount = Math.max(1, maxLanes - lanesNeeded + 1);
+  const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
+  const validLaneCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
 
   // 1. 尝试寻找完全符合条件的空闲轨道
   for (let i = 0; i < validLaneCount; i++) {
@@ -138,7 +139,8 @@ function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeede
  */
 function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
   const leaveScreenTime = currentTime + durMs;
-  const validLaneCount = Math.max(1, maxLanes - lanesNeeded + 1);
+  const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
+  const validLaneCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
 
   for (let i = 0; i < validLaneCount; i++) {
     let enoughSpace = true;
@@ -175,42 +177,6 @@ function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
     if (earliestLane + k < maxLanes) lanesArr[earliestLane + k] = { leaveScreenTime };
   }
   return { lane: earliestLane, forced: true };
-}
-
-// --- 数据端限流：按时间窗口过滤 ---
-function applyRateLimit(danmakuList, maxPerSecond) {
-  if (maxPerSecond <= 0) return danmakuList;
-
-  var result = [];
-  // 按整秒分组
-  var buckets = {};
-  for (var i = 0; i < danmakuList.length; i++) {
-    var sec = Math.floor(danmakuList[i].t);
-    if (!buckets[sec]) buckets[sec] = [];
-    buckets[sec].push(danmakuList[i]);
-  }
-
-  var keys = Object.keys(buckets).map(Number).sort(function(a, b) { return a - b; });
-  for (var k = 0; k < keys.length; k++) {
-    var bucket = buckets[keys[k]];
-    if (bucket.length <= maxPerSecond) {
-      result = result.concat(bucket);
-    } else {
-      // 超限：Fisher-Yates 随机采样，保证均匀分布而非只取前N条
-      var sampled = bucket.slice();
-      for (var j = sampled.length - 1; j > 0; j--) {
-        var pick = Math.floor(Math.random() * (j + 1));
-        var tmp = sampled[j];
-        sampled[j] = sampled[pick];
-        sampled[pick] = tmp;
-      }
-      result = result.concat(sampled.slice(0, maxPerSecond));
-    }
-  }
-
-  // 重新排序
-  result.sort(function(a, b) { return a.t - b.t; });
-  return result;
 }
 
 function createDanmaku(d, currentTime = null) {
@@ -394,7 +360,6 @@ iina.onMessage("load-danmaku", (data) => {
   if (data.fontScale) fontScale = data.fontScale;
   if (data.scrollDuration) scrollDuration = data.scrollDuration;
   if (data.opacity) currentOpacity = data.opacity;
-  if (data.maxPerSec !== undefined) maxPerSec = data.maxPerSec;
   updateLanes();
   
   const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
@@ -463,15 +428,6 @@ iina.onMessage("load-danmaku", (data) => {
 
   allDanmaku = list.sort((a, b) => a.t - b.t);
 
-  if (maxPerSec > 0) {
-    var beforeCount = allDanmaku.length;
-    allDanmaku = applyRateLimit(allDanmaku, maxPerSec);
-    var filtered = beforeCount - allDanmaku.length;
-    if (filtered > 0) {
-      console.log('[Danmaku Cosmos] Rate limit: ' + beforeCount + ' → ' + allDanmaku.length + ' (filtered ' + filtered + ')');
-    }
-  }
-
   handleSeek(0);
 });
 
@@ -525,10 +481,6 @@ iina.onMessage("set-scroll-duration", (data) => {
   scrollDuration = data.duration;
 });
 
-iina.onMessage("set-max-per-sec", (data) => {
-  maxPerSec = data.maxPerSec;
-});
-
 iina.onMessage("clear-danmaku", () => {
   container.innerHTML = '';
   activeDanmaku.clear();
@@ -540,8 +492,8 @@ iina.onMessage("apply-settings", (data) => {
   if (data.opacity !== undefined) currentOpacity = data.opacity;
   if (data.fontScale !== undefined) fontScale = data.fontScale;
   if (data.scrollDuration !== undefined) scrollDuration = data.scrollDuration;
-  if (data.maxPerSec !== undefined) maxPerSec = data.maxPerSec;
   if (data.blockForceLane !== undefined) blockForceLane = data.blockForceLane;
+  if (data.maxLaneRatio !== undefined) maxLaneRatio = data.maxLaneRatio;
   updateLanes();
 });
 
@@ -553,6 +505,13 @@ iina.onMessage("block-type", (data) => {
 
 iina.onMessage("block-force-lane", (data) => {
   blockForceLane = data.blockForceLane;
+});
+
+iina.onMessage("set-lane-limit", (data) => {
+  if (data.maxLaneRatio !== undefined) {
+    maxLaneRatio = data.maxLaneRatio;
+    updateLanes();
+  }
 });
 
 updateLanes();
