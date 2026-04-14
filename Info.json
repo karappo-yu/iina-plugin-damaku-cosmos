@@ -1,6 +1,6 @@
 {
   "name": "Danmaku Cosmos",
-  "identifier": "com.damaku-cosmos.iina-plugin",
+  "identifier": "com.danmaku-cosmos.iina-plugin",
   "version": "1.0.0",
   "description": "IINA弹幕显示插件，自动加载与视频同名的XML弹幕文件",
   "author": {
