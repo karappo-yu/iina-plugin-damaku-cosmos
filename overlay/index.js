@@ -6,6 +6,44 @@ let activeDanmaku = new Set();
 let currentIndex = 0;
 let lastTime = 0;
 let isPaused = false;
+let lastReverseState = false;
+
+function reverseAllActiveDanmaku(newReverseState) {
+  if (activeDanmaku.size === 0) return;
+  
+  const winW = window.innerWidth;
+  
+  activeDanmaku.forEach(item => {
+    const el = item.el;
+    const d = item.d;
+    const durMs = (d.m >= 1 && d.m <= 3) ? scrollDuration : fixedDuration;
+    const elapsedMs = (lastTime - d.t) * 1000;
+    const remainingMs = durMs - elapsedMs;
+    
+    const rect = el.getBoundingClientRect();
+    const currentX = rect.left;
+    const elW = rect.width;
+    
+    el.style.animation = 'none';
+    el.offsetHeight;
+    
+    if (newReverseState) {
+      const mirroredX = winW - currentX;
+      el.style.setProperty('--start-x', `${mirroredX}px`);
+      el.style.setProperty('--end-x', `${winW + elW}px`);
+    } else {
+      const mirroredX = winW - currentX;
+      el.style.setProperty('--start-x', `${mirroredX}px`);
+      el.style.setProperty('--end-x', `${-elW}px`);
+    }
+    
+    el.style.setProperty('--dur', `${remainingMs}ms`);
+    el.style.setProperty('--delay', `0ms`);
+    el.style.animation = '';
+  });
+  
+  resetLaneData();
+}
 
 // --- 动态参数 ---
 let danmakuVisible = true;
@@ -419,7 +457,8 @@ function handleSeek(timeSec) {
   activeDanmaku.clear();
   
   resetLaneData();
-  updateLanes(); 
+  updateLanes();
+  lastReverseState = false; 
   
   const durSec = Math.max(scrollDuration, fixedDuration) / 1000;
   currentIndex = allDanmaku.findIndex(d => d.t >= timeSec - durSec);
@@ -447,6 +486,13 @@ iina.onMessage("time-update", (data) => {
       currentIndex++;
     }
   }
+  
+  const currentReverseState = isReverseActive(t, false);
+  if (currentReverseState !== lastReverseState && activeDanmaku.size > 0) {
+    reverseAllActiveDanmaku(currentReverseState);
+    lastReverseState = currentReverseState;
+  }
+  
   lastTime = t;
 });
 
@@ -462,6 +508,7 @@ iina.onMessage("load-danmaku", (data) => {
   nicoScripts.reverse = [];
   reverseActiveOwnerCache.clear();
   reverseActiveViewerCache.clear();
+  lastReverseState = false;
   
   let list = [];
   const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
