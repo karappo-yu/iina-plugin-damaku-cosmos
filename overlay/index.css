@@ -36,8 +36,8 @@ html, body {
   position: absolute;                    /* 绝对定位，相对于容器 */
   white-space: nowrap;                   /* 不换行 */
   font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Meiryo', sans-serif;  /* 日系字体优先 */
-  font-weight: 700;                      /* 字重：100-900，400=正常，700=粗体，900=超粗 */
-  -webkit-text-stroke: 0.08vw rgba(0,0,0,0.5);  /* 描边宽度（相对视口），颜色+透明度 */
+  font-weight: 800;                      /* 字重：100-900，400=正常，700=粗体，900=超粗 */
+  -webkit-text-stroke: 0.16vw rgba(0,0,0,0.5);  /* 描边宽度（相对视口），颜色+透明度 */
   will-change: transform;                /* 提示浏览器优化 transform 动画性能 */
   contain: layout style paint;           /* 隔离布局，减少重排范围 */
   /* 绑定全局暂停变量 */

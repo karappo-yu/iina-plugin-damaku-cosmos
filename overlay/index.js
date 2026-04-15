@@ -10,14 +10,14 @@ let isPaused = false;
 // --- 动态参数 ---
 let danmakuVisible = true;
 let currentOpacity = 0.8;
-let scrollDuration = 4000; // Nico 经典滚动基准时间为 4s
+let scrollDuration = 4000;
 let fixedDuration = 4000;
 let fontScale = 1.0;
-let blockForceLane = false; // 过滤强制分配轨道的弹幕（溢出弹幕）
-let maxLaneRatio = 1.0; // 限制轨道数比例，1.0 = 全部轨道，0.5 = 只用上半部分
-const _refHeight = 1080; 
+let blockForceLane = false;
+let maxLaneRatio = 1.0;
+const _refHeight = 1080;
 
-// --- Nico 专属颜色映射表 (Niconico Color Dict) ---
+// --- Nico 专属颜色映射表 ---
 const NICO_COLORS = {
   red: '#FF0000', pink: '#FF8080', orange: '#FFC000', yellow: '#FFFF00',
   green: '#00FF00', cyan: '#00FFFF', blue: '#0000FF', purple: '#C000FF',
@@ -28,26 +28,33 @@ const NICO_COLORS = {
   purple2: '#6633CC', black2: '#666666'
 };
 
-// --- 动态轨道控制 ---
+// --- 多层偏移常量 ---
+const MAX_OFFSET_LEVELS = 3;        // 0=正常层，1=偏移层1，2=偏移层2
+const OFFSET_STEP = 0.25;           // 每层视觉偏移（单位：lane）
+
+// --- 动态轨道控制（现在是 2D 数组 [lane][level]）---
 let maxLanes = 0;
 let scrollLanes = []; 
 let topLanes = [];
 let bottomLanes = [];
 
 function resetLaneData() {
-  // 核心更改：将轨道数据结构从单一数字改为对象
-  // tailEnterTime: 用于判断入口是否空闲
-  // tailReachOneThirdTime: 尾部到达左侧 1/3 处的时间，用于判断追尾
-  // leaveScreenTime: (用于固定弹幕) 完全消失时间
-  scrollLanes = Array.from({ length: maxLanes }, () => ({ tailEnterTime: 0, tailReachOneThirdTime: 0 }));
-  topLanes = Array.from({ length: maxLanes }, () => ({ leaveScreenTime: 0 }));
-  bottomLanes = Array.from({ length: maxLanes }, () => ({ leaveScreenTime: 0 }));
+  scrollLanes = Array.from({ length: maxLanes }, () =>
+    Array.from({ length: MAX_OFFSET_LEVELS }, () => ({ tailEnterTime: 0, tailReachOneThirdTime: 0 }))
+  );
+  topLanes = Array.from({ length: maxLanes }, () =>
+    Array.from({ length: MAX_OFFSET_LEVELS }, () => ({ leaveScreenTime: 0 }))
+  );
+  bottomLanes = Array.from({ length: maxLanes }, () =>
+    Array.from({ length: MAX_OFFSET_LEVELS }, () => ({ leaveScreenTime: 0 }))
+  );
 }
 
 // 新增：清除弹幕的布局与轨道缓存
 function clearDanmakuCaches() {
   allDanmaku.forEach(d => {
     d._lane = undefined;
+    d._offsetLevel = undefined;
     d._textW = undefined;
     d._forced = undefined;
   });
@@ -64,113 +71,186 @@ function updateLanes() {
 }
 
 /**
- * 获取空闲的滚动轨道 (应用左侧1/3防追尾算法)
+ * 获取按「最早释放时间」（Level 0 的 releaseTime）排序的可起始轨道列表
+ * 用于所有层级查找，保证优先使用最早空闲的 base lane
  */
-function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeeded) {
-  const speed = (winW + textW) / durMs;
-  const tailEnterTime = currentTime + (textW / speed) + 100; // 100ms 安全缓冲
-  
-  // 新弹幕头部到达 1/3 处的时间 = 行驶 2/3 屏幕宽度的耗时
-  const headReachOneThirdTime = currentTime + (2 * winW / 3) / speed;
-  // 当前弹幕尾部到达 1/3 处的时间 = 行驶 2/3 屏幕宽 + 弹幕宽度的耗时
-  const tailReachOneThirdTime = currentTime + (2 * winW / 3 + textW) / speed;
-
+function getSortedStartingLanes(lanes2d, lanesNeeded, isScroll) {
   const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
-  const validLaneCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
+  const validStartsCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
+  let infos = [];
 
-  // 1. 尝试寻找完全符合条件的空闲轨道
-  for (let i = 0; i < validLaneCount; i++) {
-    let enoughSpace = true;
+  for (let start = 0; start < validStartsCount; start++) {
+    let blockRelease = -Infinity;
     for (let k = 0; k < lanesNeeded; k++) {
-      if (i + k >= maxLanes) {
-        enoughSpace = false;
-        break;
-      }
-      const lane = lanesArr[i + k];
-      
-      // 条件 A: 尾部已入屏，入口空闲
-      const isEntranceFree = currentTime >= lane.tailEnterTime;
-      // 条件 B: 新弹幕头部到达 1/3 处时，老弹幕尾部已经越过 1/3 处（允许在 1/3 区域内追尾相撞）
-      const isNoCatchUpBeforeOneThird = headReachOneThirdTime >= lane.tailReachOneThirdTime;
-
-      if (!isEntranceFree || !isNoCatchUpBeforeOneThird) {
-        enoughSpace = false;
-        break;
-      }
+      const sub = start + k;
+      let rel = isScroll
+        ? lanes2d[sub][0].tailEnterTime
+        : lanes2d[sub][0].leaveScreenTime;
+      blockRelease = Math.max(blockRelease, rel);
     }
-    
-    if (enoughSpace) {
-      for (let k = 0; k < lanesNeeded; k++) {
-        if (i + k < maxLanes) {
-          lanesArr[i + k] = { tailEnterTime, tailReachOneThirdTime };
-        }
-      }
-      return { lane: i, forced: false };
-    }
+    infos.push({ startLane: start, releaseTime: blockRelease });
   }
 
-  // 2. 如果找不到完全符合条件的，寻找最先释放入口的轨道 (暂不更新，等调用方决定)
-  let earliestLane = 0;
-  let earliestTime = Infinity;
-  for (let i = 0; i < validLaneCount; i++) {
-    let maxTailEnter = 0;
-    for (let k = 0; k < lanesNeeded; k++) {
-      if (i + k < maxLanes) {
-        maxTailEnter = Math.max(maxTailEnter, lanesArr[i + k].tailEnterTime);
-      }
-    }
-    if (maxTailEnter < earliestTime) {
-      earliestTime = maxTailEnter;
-      earliestLane = i;
-    }
-  }
-  // 返回强制分配标记，但不更新轨道状态
-  return { lane: earliestLane, forced: true };
+  infos.sort((a, b) => a.releaseTime - b.releaseTime);
+  return infos;
 }
 
 /**
- * 获取空闲的固定轨道 (顶部/底部弹幕)
+ * 获取空闲的滚动轨道（全新多层偏移算法）
  */
-function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
-  const leaveScreenTime = currentTime + durMs;
-  const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
-  const validLaneCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
+function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeeded) {
+  const speed = (winW + textW) / durMs;
+  const tailEnterTimeNew = currentTime + (textW / speed) + 100;
+  const headReachOneThirdTime = currentTime + (2 * winW / 3) / speed;
+  const tailReachOneThirdTimeNew = currentTime + (2 * winW / 3 + textW) / speed;
 
-  for (let i = 0; i < validLaneCount; i++) {
+  const laneInfos = getSortedStartingLanes(lanesArr, lanesNeeded, true);
+
+  // Level 0（正常层）：严格 1/3 防追尾
+  for (let info of laneInfos) {
+    const start = info.startLane;
     let enoughSpace = true;
     for (let k = 0; k < lanesNeeded; k++) {
-      if (i + k >= maxLanes || currentTime < lanesArr[i + k].leaveScreenTime) {
+      const slot = lanesArr[start + k][0]; // Level 0
+      const isEntranceFree = currentTime >= slot.tailEnterTime;
+      const isNoCatchUp = headReachOneThirdTime >= slot.tailReachOneThirdTime;
+      if (!isEntranceFree || !isNoCatchUp) {
         enoughSpace = false;
         break;
       }
     }
     if (enoughSpace) {
-      for (let k = 0; k < lanesNeeded; k++) {
-        if (i + k < maxLanes) lanesArr[i + k] = { leaveScreenTime };
-      }
-      return { lane: i, forced: false };
+      return { lane: start, forced: false, offsetLevel: 0 };
     }
   }
 
-  let earliestLane = 0;
-  let earliestTime = Infinity;
-  for (let i = 0; i < validLaneCount; i++) {
-    let maxLeave = 0;
+  // Level 1（偏移层1）：仅检查该层是否已被占用（强制塞入）
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
     for (let k = 0; k < lanesNeeded; k++) {
-      if (i + k < maxLanes) {
-        maxLeave = Math.max(maxLeave, lanesArr[i + k].leaveScreenTime);
+      const slot = lanesArr[start + k][1]; // Level 1
+      if (currentTime < slot.tailEnterTime) {
+        enoughSpace = false;
+        break;
       }
     }
-    if (maxLeave < earliestTime) {
-      earliestTime = maxLeave;
-      earliestLane = i;
+    if (enoughSpace) {
+      return { lane: start, forced: true, offsetLevel: 1 };
     }
   }
 
-  for (let k = 0; k < lanesNeeded; k++) {
-    if (earliestLane + k < maxLanes) lanesArr[earliestLane + k] = { leaveScreenTime };
+  // Level 2（偏移层2）：同上
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      const slot = lanesArr[start + k][2]; // Level 2
+      if (currentTime < slot.tailEnterTime) {
+        enoughSpace = false;
+        break;
+      }
+    }
+    if (enoughSpace) {
+      return { lane: start, forced: true, offsetLevel: 2 };
+    }
   }
-  return { lane: earliestLane, forced: true };
+
+  // 5. 所有层级都满了 → 找第一个 Level 0 未被占用的轨道（入口空闲）
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let level0NotUsed = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      const slot = lanesArr[start + k][0];
+      if (currentTime < slot.tailEnterTime) {
+        level0NotUsed = false;
+        break;
+      }
+    }
+    if (level0NotUsed) {
+      return { lane: start, forced: true, offsetLevel: 0 };
+    }
+  }
+
+  // 最终保底：强制 Level 0（最早的轨道）
+  if (laneInfos.length > 0) {
+    return { lane: laneInfos[0].startLane, forced: true, offsetLevel: 0 };
+  }
+  return null;
+}
+
+/**
+ * 获取空闲的固定轨道（顶部/底部）—— 同多层偏移逻辑
+ */
+function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
+  const leaveScreenTimeNew = currentTime + durMs;
+  const laneInfos = getSortedStartingLanes(lanesArr, lanesNeeded, false);
+
+  // Level 0（正常层）
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][0].leaveScreenTime) {
+        enoughSpace = false;
+        break;
+      }
+    }
+    if (enoughSpace) {
+      return { lane: start, forced: false, offsetLevel: 0 };
+    }
+  }
+
+  // Level 1（偏移层1）
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][1].leaveScreenTime) {
+        enoughSpace = false;
+        break;
+      }
+    }
+    if (enoughSpace) {
+      return { lane: start, forced: true, offsetLevel: 1 };
+    }
+  }
+
+  // Level 2（偏移层2）
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][2].leaveScreenTime) {
+        enoughSpace = false;
+        break;
+      }
+    }
+    if (enoughSpace) {
+      return { lane: start, forced: true, offsetLevel: 2 };
+    }
+  }
+
+  // 所有层级都满了 → 找第一个 Level 0 未被占用的轨道
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let level0NotUsed = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][0].leaveScreenTime) {
+        level0NotUsed = false;
+        break;
+      }
+    }
+    if (level0NotUsed) {
+      return { lane: start, forced: true, offsetLevel: 0 };
+    }
+  }
+
+  // 最终保底
+  if (laneInfos.length > 0) {
+    return { lane: laneInfos[0].startLane, forced: true, offsetLevel: 0 };
+  }
+  return null;
 }
 
 function createDanmaku(d, currentTime = null) {
@@ -183,10 +263,9 @@ function createDanmaku(d, currentTime = null) {
   if (isScroll && window._blockScroll) return;
   if (isTop && window._blockTop) return;
   if (isBottom && window._blockBottom) return;
-  const durMs = isScroll ? scrollDuration : fixedDuration;
 
+  const durMs = isScroll ? scrollDuration : fixedDuration;
   const videoTimeMs = d.t * 1000;
-  // 统一时间流：修正偏移误差
   const elapsedMs = currentTime !== null ? (currentTime - d.t) * 1000 : 0;
   
   if (elapsedMs >= durMs || elapsedMs < 0) return;
@@ -198,7 +277,6 @@ function createDanmaku(d, currentTime = null) {
   el.dataset.size = d.size;
   const danmakuFs = ((d.size / 25) * (100 / 15) * fontScale).toFixed(4) + 'vh';
   el.style.fontSize = danmakuFs;
-  // 黑色弹幕：白边增强可见性
   if (d.c === '#000000' || d.c === 'black' || d.c === 'rgb(0,0,0)') {
     el.style.webkitTextStroke = '0.03vw rgba(255,255,255,0.7)';
   }
@@ -209,51 +287,30 @@ function createDanmaku(d, currentTime = null) {
 
   container.appendChild(el);
 
-  // 生命周期过半后降低优先级，让新弹幕可以覆盖
   if (isBottom || isTop) {
-    setTimeout(function() {
-      el.classList.add('priority-low');
-    }, durMs / 2);
+    setTimeout(() => el.classList.add('priority-low'), durMs / 2);
   }
 
-  // 利用缓存跳过耗时的 layout reflow
   if (d._textW === undefined) {
     d._textW = el.offsetWidth;
   }
   const textW = d._textW;
   const winW = window.innerWidth;
   const lanesNeeded = Math.ceil(d.size / 25);
+
+  // ========== 轨道分配 ==========
   let lane = d._lane;
-  
-  // 核心分配逻辑分流，带有轨道记忆
-  if (lane !== undefined && lane < maxLanes) {
-    // 如果有记忆的轨道，则直接使用，但依然要更新全局轨道占用状态
-    // 如果该弹幕之前是强制分配的且开启了过滤，则跳过
-    if (blockForceLane && d._forced) {
+  let offsetLevel = (d._offsetLevel !== undefined) ? d._offsetLevel : 0;
+
+  const isMemory = lane !== undefined && lane < maxLanes;
+
+  if (isMemory) {
+    if (blockForceLane && (d._forced ?? false)) {
       el.remove();
       return;
     }
-    if (isScroll) {
-      const speed = (winW + textW) / durMs;
-      const tailEnterTime = videoTimeMs + (textW / speed) + 100;
-      const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
-      for (let k = 0; k < lanesNeeded; k++) {
-        if (lane + k < maxLanes) {
-          scrollLanes[lane + k] = { tailEnterTime, tailReachOneThirdTime };
-        }
-      }
-    } else if (isTop) {
-      for (let k = 0; k < lanesNeeded; k++) {
-        if (lane + k < maxLanes) topLanes[lane + k] = { leaveScreenTime: videoTimeMs + durMs };
-      }
-    } else if (isBottom) {
-      for (let k = 0; k < lanesNeeded; k++) {
-        if (lane + k < maxLanes) bottomLanes[lane + k] = { leaveScreenTime: videoTimeMs + durMs };
-      }
-    }
   } else {
-    // 如果没有记忆，则重新计算并缓存
-    let result;
+    let result = null;
     if (isScroll) {
       result = getFreeScrollLane(scrollLanes, textW, winW, durMs, videoTimeMs, lanesNeeded);
     } else if (isTop) {
@@ -261,43 +318,53 @@ function createDanmaku(d, currentTime = null) {
     } else if (isBottom) {
       result = getFreeFixedLane(bottomLanes, durMs, videoTimeMs, lanesNeeded);
     }
-    if (result) {
-      // 过滤强制分配轨道的溢出弹幕
-      if (blockForceLane && result.forced) {
-        el.remove();
-        return;
-      }
-      lane = result.lane;
-      d._lane = lane;
-      d._forced = result.forced;
-      // 更新轨道状态
-      if (isScroll) {
-        const speed = (winW + textW) / durMs;
-        const tailEnterTime = videoTimeMs + (textW / speed) + 100;
-        const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
-        for (let k = 0; k < lanesNeeded; k++) {
-          if (lane + k < maxLanes) {
-            scrollLanes[lane + k] = { tailEnterTime, tailReachOneThirdTime };
-          }
-        }
-      } else if (isTop) {
-        for (let k = 0; k < lanesNeeded; k++) {
-          if (lane + k < maxLanes) topLanes[lane + k] = { leaveScreenTime: videoTimeMs + durMs };
-        }
-      } else if (isBottom) {
-        for (let k = 0; k < lanesNeeded; k++) {
-          if (lane + k < maxLanes) bottomLanes[lane + k] = { leaveScreenTime: videoTimeMs + durMs };
-        }
+
+    if (!result) {
+      el.remove();
+      return;
+    }
+    if (blockForceLane && result.forced) {
+      el.remove();
+      return;
+    }
+
+    lane = result.lane;
+    offsetLevel = result.offsetLevel;
+    d._lane = lane;
+    d._offsetLevel = offsetLevel;
+    d._forced = result.forced;
+  }
+
+  // ========== 统一更新轨道占用状态（记忆或新分配都走这里）==========
+  if (isScroll) {
+    const speed = (winW + textW) / durMs;
+    const tailEnterTime = videoTimeMs + (textW / speed) + 100;
+    const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (lane + k < maxLanes) {
+        scrollLanes[lane + k][offsetLevel] = { tailEnterTime, tailReachOneThirdTime };
       }
     }
-  }
-  
-  const laneHeightVh = (100 / maxLanes);
-
-  if (isScroll || isTop) {
-    el.style.top = `${lane * laneHeightVh}vh`;
+  } else if (isTop) {
+    const leaveScreenTime = videoTimeMs + durMs;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (lane + k < maxLanes) topLanes[lane + k][offsetLevel] = { leaveScreenTime };
+    }
   } else if (isBottom) {
-    el.style.bottom = `${lane * laneHeightVh + 1}vh`;
+    const leaveScreenTime = videoTimeMs + durMs;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (lane + k < maxLanes) bottomLanes[lane + k][offsetLevel] = { leaveScreenTime };
+    }
+  }
+
+  // ========== 视觉定位（带偏移）==========
+  const laneHeightVh = 100 / maxLanes;
+  let visualTop = lane + offsetLevel * OFFSET_STEP;
+  if (isScroll || isTop) {
+    el.style.top = `${visualTop * laneHeightVh}vh`;
+  } else if (isBottom) {
+    const visualBottom = Math.max(0, lane - offsetLevel * OFFSET_STEP);
+    el.style.bottom = `${visualBottom * laneHeightVh + 1}vh`;
   }
 
   el.style.setProperty('--dur', `${durMs}ms`);
@@ -324,6 +391,7 @@ function createDanmaku(d, currentTime = null) {
   });
 }
 
+// 其余函数保持不变（handleSeek、iina 消息处理等）
 function handleSeek(timeSec) {
   container.innerHTML = '';
   activeDanmaku.clear();
@@ -353,7 +421,7 @@ iina.onMessage("time-update", (data) => {
     handleSeek(t);
   } else if (!isPaused) {
     while (currentIndex < allDanmaku.length && allDanmaku[currentIndex].t <= t) {
-      createDanmaku(allDanmaku[currentIndex], t); // 补充关键代码：正常播放也要传入精准时间戳
+      createDanmaku(allDanmaku[currentIndex], t);
       currentIndex++;
     }
   }
@@ -440,7 +508,7 @@ iina.onMessage("load-danmaku", (data) => {
 
 iina.onMessage("resize", () => {
   updateLanes();
-  clearDanmakuCaches(); // 清除过期的布局缓存
+  clearDanmakuCaches();
 
   activeDanmaku.forEach(item => {
     if (item.type === 'fixed') {
@@ -478,7 +546,7 @@ iina.onMessage("set-opacity", (data) => {
 iina.onMessage("set-fontscale", (data) => {
   fontScale = data.scale;
   updateLanes();
-  clearDanmakuCaches(); // 清除过期的布局缓存
+  clearDanmakuCaches();
   handleSeek(lastTime);
 });
 
