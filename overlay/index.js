@@ -201,14 +201,12 @@ function createDanmaku(d, currentTime = null) {
   el.className = 'dm-item';
   el.textContent = d.text;
   el.style.color = d.c;
-  el.style.opacity = currentOpacity;
   el.dataset.size = d.size;
   const danmakuFs = (d.size * fontScale / _refWidth * 100).toFixed(4) + 'vw';
   el.style.fontSize = danmakuFs;
-  // 黑色弹幕：白边 + 保留原有黑边
+  // 黑色弹幕：白边增强可见性
   if (d.c === '#000000' || d.c === 'black' || d.c === 'rgb(0,0,0)') {
     el.style.webkitTextStroke = '0.03vw rgba(255,255,255,0.7)';
-    el.style.filter = 'drop-shadow(0 0 0.1vw rgba(0,0,0,0.4)) drop-shadow(0 0 0.05vw rgba(255,255,255,0.3))';
   }
 
   if (isScroll) el.classList.add('dm-scroll');
@@ -371,7 +369,10 @@ iina.onMessage("time-update", (data) => {
 iina.onMessage("load-danmaku", (data) => {
   if (data.fontScale) fontScale = data.fontScale;
   if (data.scrollDuration) scrollDuration = data.scrollDuration;
-  if (data.opacity) currentOpacity = data.opacity;
+  if (data.opacity) {
+    currentOpacity = data.opacity;
+    document.documentElement.style.setProperty('--global-opacity', currentOpacity);
+  }
   updateLanes();
   
   const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
@@ -477,9 +478,7 @@ iina.onMessage("toggle-danmaku", (data) => {
 
 iina.onMessage("set-opacity", (data) => {
   currentOpacity = data.opacity;
-  activeDanmaku.forEach(item => {
-    item.el.style.opacity = currentOpacity;
-  });
+  document.documentElement.style.setProperty('--global-opacity', currentOpacity);
 });
 
 iina.onMessage("set-fontscale", (data) => {
@@ -501,7 +500,10 @@ iina.onMessage("clear-danmaku", () => {
 });
 
 iina.onMessage("apply-settings", (data) => {
-  if (data.opacity !== undefined) currentOpacity = data.opacity;
+  if (data.opacity !== undefined) {
+    currentOpacity = data.opacity;
+    document.documentElement.style.setProperty('--global-opacity', currentOpacity);
+  }
   if (data.fontScale !== undefined) fontScale = data.fontScale;
   if (data.scrollDuration !== undefined) scrollDuration = data.scrollDuration;
   if (data.blockForceLane !== undefined) blockForceLane = data.blockForceLane;
