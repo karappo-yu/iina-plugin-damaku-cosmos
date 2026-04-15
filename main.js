@@ -51,6 +51,8 @@ function extractEpisodeNumber(videoPath) {
 function danmakuPathForVideo(videoUrl) {
   var path = filePathFromUrl(videoUrl);
   if (!path) return null;
+  var jsonPath = path.replace(/\.[^.\/\\]+$/, ".json");
+  if (file.exists(jsonPath)) return jsonPath;
   return path.replace(/\.[^.\/\\]+$/, ".xml");
 }
 
@@ -78,30 +80,35 @@ function loadDanmakuForVideo(url) {
   }
 
   if (!file.exists(danmakuPath)) {
-    var altDanmakuPath = danmakuPath.replace(/[/\\][^/\\]+$/, '/弹幕$&');
-    if (!file.exists(altDanmakuPath)) {
-      altDanmakuPath = danmakuPath.replace(/[/\\][^/\\]+$/, '/Comments$&');
+    var videoBaseName = danmakuPath.replace(/\.[^.\/\\]+$/, '');
+    var altDanmakuPath = videoBaseName.replace(/[/\\][^/\\]+$/, '/弹幕/' + videoBaseName.split('/').pop());
+    if (!file.exists(altDanmakuPath + '.json') && !file.exists(altDanmakuPath + '.xml')) {
+      altDanmakuPath = videoBaseName.replace(/[/\\][^/\\]+$/, '/Comments/' + videoBaseName.split('/').pop());
     }
-    if (!file.exists(altDanmakuPath)) {
-      altDanmakuPath = danmakuPath.replace(/[/\\][^/\\]+$/, '/コメント$&');
+    if (!file.exists(altDanmakuPath + '.json') && !file.exists(altDanmakuPath + '.xml')) {
+      altDanmakuPath = videoBaseName.replace(/[/\\][^/\\]+$/, '/コメント/' + videoBaseName.split('/').pop());
     }
-    if (file.exists(altDanmakuPath)) {
-      danmakuPath = altDanmakuPath;
+    if (file.exists(altDanmakuPath + '.json')) {
+      danmakuPath = altDanmakuPath + '.json';
+    } else if (file.exists(altDanmakuPath + '.xml')) {
+      danmakuPath = altDanmakuPath + '.xml';
     } else {
       var epNum = extractEpisodeNumber(danmakuPath);
       if (epNum !== null) {
-        var danmakuDir = danmakuPath.replace(/[/\\][^/\\]+$/, '/弹幕');
-        var epDanmakuPath = danmakuDir + '/' + epNum + '.xml';
-        if (!file.exists(epDanmakuPath)) {
-          danmakuDir = danmakuPath.replace(/[/\\][^/\\]+$/, '/Comments');
-          epDanmakuPath = danmakuDir + '/' + epNum + '.xml';
+        var danmakuDir = videoBaseName.replace(/[/\\][^/\\]+$/, '/弹幕');
+        var epDanmakuPath = danmakuDir + '/' + epNum;
+        if (!file.exists(epDanmakuPath + '.json') && !file.exists(epDanmakuPath + '.xml')) {
+          danmakuDir = videoBaseName.replace(/[/\\][^/\\]+$/, '/Comments');
+          epDanmakuPath = danmakuDir + '/' + epNum;
         }
-        if (!file.exists(epDanmakuPath)) {
-          danmakuDir = danmakuPath.replace(/[/\\][^/\\]+$/, '/コメント');
-          epDanmakuPath = danmakuDir + '/' + epNum + '.xml';
+        if (!file.exists(epDanmakuPath + '.json') && !file.exists(epDanmakuPath + '.xml')) {
+          danmakuDir = videoBaseName.replace(/[/\\][^/\\]+$/, '/コメント');
+          epDanmakuPath = danmakuDir + '/' + epNum;
         }
-        if (file.exists(epDanmakuPath)) {
-          danmakuPath = epDanmakuPath;
+        if (file.exists(epDanmakuPath + '.json')) {
+          danmakuPath = epDanmakuPath + '.json';
+        } else if (file.exists(epDanmakuPath + '.xml')) {
+          danmakuPath = epDanmakuPath + '.xml';
         } else {
           pendingDanmaku = null;
           if (overlayReady) overlay.postMessage("clear-danmaku", {});
@@ -323,8 +330,8 @@ menu.addItem(
 
 menu.addItem(
   menu.item("手动加载弹幕文件…", function () {
-    iina.utils.chooseFile("选择弹幕XML文件", {
-      allowedFileTypes: ["xml"],
+    iina.utils.chooseFile("选择弹幕文件", {
+      allowedFileTypes: ["json", "xml"],
     }).then(function(path) {
       if (!path) {
         core.osd("未选择文件");

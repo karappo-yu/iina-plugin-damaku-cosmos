@@ -32,6 +32,64 @@ const NICO_COLORS = {
 const MAX_OFFSET_LEVELS = 3;
 const OFFSET_STEP = 0.25;           // 可微调：0.22~0.28 之间最舒服
 
+// --- 倒放脚本状态 ---
+const nicoScripts = {
+  reverse: []
+};
+let reverseActiveOwnerCache = new Map();
+let reverseActiveViewerCache = new Map();
+
+// --- 倒放脚本解析 ---
+const RE_REVERSE = /^@\u9006(?:\s+)?(\u5168|\u30b3\u30e1|\u6295\u30b3\u30e1)?/;
+
+function processReverseScript(vposSec, content, commands) {
+  const reverseMatch = RE_REVERSE.exec(content);
+  if (!reverseMatch) return;
+  
+  const target = reverseMatch[1] || "\u5168";
+  let durationSec = 30;
+  
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationSec = parseInt(durationMatch[1], 10);
+      break;
+    }
+  }
+  
+  nicoScripts.reverse.unshift({
+    start: vposSec,
+    end: vposSec + durationSec,
+    target: target
+  });
+  reverseActiveOwnerCache.clear();
+  reverseActiveViewerCache.clear();
+}
+
+function isReverseActive(vposSec, isOwner) {
+  const cache = isOwner ? reverseActiveOwnerCache : reverseActiveViewerCache;
+  const cached = cache.get(vposSec);
+  if (cached !== undefined) return cached;
+  
+  let result = false;
+  for (const range of nicoScripts.reverse) {
+    if (
+      (range.target === "\u30b3\u30e1" && isOwner) ||
+      (range.target === "\u6295\u30b3\u30e1" && !isOwner)
+    ) {
+      continue;
+    }
+    if (range.start <= vposSec && vposSec <= range.end) {
+      result = true;
+      break;
+    }
+  }
+  
+  cache.set(vposSec, result);
+  return result;
+}
+
+// --- 动态轨道控制（现在是 2D 数组 [lane][level]）---
 let maxLanes = 0;
 let scrollLanes = [];
 let topLanes = [];
@@ -327,9 +385,16 @@ function createDanmaku(d, currentTime = null) {
   el.style.setProperty('--dur', `${durMs}ms`);
   el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
+  const isReverse = isReverseActive(videoTimeMs / 1000, d._isOwner);
+
   if (isScroll) {
-    el.style.setProperty('--start-x', `100vw`);
-    el.style.setProperty('--end-x', `-100%`);
+    if (isReverse) {
+      el.style.setProperty('--start-x', `-100%`);
+      el.style.setProperty('--end-x', `100vw`);
+    } else {
+      el.style.setProperty('--start-x', `100vw`);
+      el.style.setProperty('--end-x', `-100%`);
+    }
   } else {
     const maxW = winW * 0.95;
     if (textW > maxW) {
@@ -394,9 +459,75 @@ iina.onMessage("load-danmaku", (data) => {
   }
   updateLanes();
   
+  nicoScripts.reverse = [];
+  reverseActiveOwnerCache.clear();
+  reverseActiveViewerCache.clear();
+  
+  let list = [];
   const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
   const xmlStr = decodeURIComponent(encodedStr);
   
+  const tryJson = encodedStr.startsWith('%5b') || encodedStr.startsWith('%5B') || encodedStr.startsWith('[');
+  if (tryJson) {
+    try {
+      const jsonData = JSON.parse(decodeURIComponent(encodedStr));
+      for (const thread of jsonData) {
+        const isOwner = thread.fork === 'owner';
+        for (const comment of thread.comments) {
+          if (!comment.body) continue;
+          const vposSec = comment.vposMs / 1000;
+          const commands = comment.commands || [];
+          const content = comment.body;
+          
+          if (isOwner) {
+            processReverseScript(vposSec, content, commands);
+          }
+          
+          let mode = 1;
+          if (commands.includes('shita')) mode = 4;
+          else if (commands.includes('ue')) mode = 5;
+          
+          let size = 25;
+          if (commands.includes('big')) size = 36;
+          else if (commands.includes('small')) size = 15;
+          
+          let color = '#FFFFFF';
+          for (const cmd of commands) {
+            const colorLower = cmd.toLowerCase();
+            if (NICO_COLORS[colorLower]) {
+              color = NICO_COLORS[colorLower];
+              break;
+            }
+            if (cmd.startsWith('#') && (cmd.length === 7 || cmd.length === 4)) {
+              color = cmd;
+              break;
+            }
+          }
+          
+          list.push({
+            t: vposSec,
+            m: mode,
+            c: color,
+            text: content,
+            size: size,
+            _isOwner: isOwner
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('JSON parse failed, falling back to XML:', e);
+      list = parseXmlDanmaku(xmlStr);
+    }
+  } else {
+    list = parseXmlDanmaku(xmlStr);
+  }
+
+  allDanmaku = list.sort((a, b) => a.t - b.t);
+
+  handleSeek(0);
+});
+
+function parseXmlDanmaku(xmlStr) {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlStr, "text/xml");
   const chats = xmlDoc.getElementsByTagName('chat');
@@ -457,11 +588,8 @@ iina.onMessage("load-danmaku", (data) => {
       });
     }
   }
-
-  allDanmaku = list.sort((a, b) => a.t - b.t);
-
-  handleSeek(0);
-});
+  return list;
+}
 
 iina.onMessage("resize", () => {
   updateLanes();
