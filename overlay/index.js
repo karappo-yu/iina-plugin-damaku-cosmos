@@ -159,7 +159,8 @@ const nicoScripts = {
   reverse: [],
   speed: [],
   default: [],
-  ban: []
+  ban: [],
+  replace: []
 };
 let reverseActiveOwnerCache = new Map();
 let reverseActiveViewerCache = new Map();
@@ -329,6 +330,105 @@ function isBanActive(vposSec) {
     if (range.start < vposSec && vposSec < range.end) return true;
   }
   return false;
+}
+
+const RE_REPLACE = /^[@\uff20]\u7f6e\u63db/;
+
+function splitQuotedString(str) {
+  const chars = [...str];
+  const result = [];
+  let quoteChar = '';
+  let current = '';
+  let prev = '';
+
+  for (const ch of chars) {
+    if ((ch === '"' || ch === "'" || ch === '\u300c') && quoteChar === '') {
+      quoteChar = ch;
+    } else if ((ch === '"' || ch === "'") && quoteChar === ch && prev !== '\\') {
+      result.push(current.replaceAll('\\n', '\n'));
+      quoteChar = '';
+      current = '';
+    } else if (ch === '\u300d' && quoteChar === '\u300c') {
+      result.push(current);
+      quoteChar = '';
+      current = '';
+    } else if (quoteChar === '' && /^\s$/.test(ch)) {
+      if (current) { result.push(current); current = ''; }
+    } else {
+      current += ch;
+    }
+    prev = ch;
+  }
+  if (current) result.push(current);
+  return result;
+}
+
+function processReplaceScript(vposSec, content, commands, mc) {
+  if (!RE_REPLACE.test(content)) return;
+
+  let durationSec = 30;
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationSec = parseInt(durationMatch[1], 10);
+      break;
+    }
+  }
+
+  const params = splitQuotedString(content.slice(4));
+
+  const validTargets = ['コメ', '投コメ', '全', '含まない', '含む'];
+  const validConditions = ['部分一致', '完全一致'];
+  const target = validTargets.includes(params[3]) ? params[3] : 'コメ';
+  const condition = validConditions.includes(params[4]) ? params[4] : '部分一致';
+
+  nicoScripts.replace.unshift({
+    start: vposSec,
+    end: vposSec + durationSec,
+    keyword: params[0] ?? '',
+    replace: params[1] ?? '',
+    range: params[2] === '全' ? '全' : '単',
+    target: target,
+    condition: condition,
+    color: mc.color !== '#FFFFFF' ? mc.color : null,
+    size: mc.size !== 25 ? mc.size : null,
+    font: mc.font,
+    loc: mc.mode !== 1 ? mc.mode : null
+  });
+
+  nicoScripts.replace.sort((a, b) =>
+    a.start < b.start ? -1 : a.start > b.start ? 1 : 0
+  );
+}
+
+function applyReplaceScripts(vposSec, danmaku) {
+  nicoScripts.replace = nicoScripts.replace.filter(
+    item => !item.end || item.end >= vposSec
+  );
+
+  for (const rule of nicoScripts.replace) {
+    if (rule.start > vposSec) continue;
+    if (rule.end && rule.end <= vposSec) continue;
+
+    if ((rule.target === 'コメ' || rule.target === '含まない') && danmaku._isOwner) continue;
+    if (rule.target === '投コメ' && !danmaku._isOwner) continue;
+    if (rule.target === '含まない' && danmaku._isOwner) continue;
+    if (rule.condition === '完全一致' && danmaku.text !== rule.keyword) continue;
+    if (rule.condition === '部分一致' && !danmaku.text.includes(rule.keyword)) continue;
+
+    if (rule.range === '単') {
+      danmaku.text = danmaku.text.replaceAll(rule.keyword, rule.replace);
+    } else {
+      danmaku.text = rule.replace;
+    }
+
+    if (rule.loc) danmaku.m = rule.loc;
+    if (rule.color) danmaku.c = rule.color;
+    if (rule.size) danmaku.size = rule.size;
+    if (rule.font) danmaku.font = rule.font;
+  }
+
+  return danmaku;
 }
 
 // --- 动态轨道控制（现在是 2D 数组 [lane][level]）---
@@ -762,6 +862,7 @@ iina.onMessage("load-danmaku", (data) => {
   nicoScripts.speed = [];
   nicoScripts.default = [];
   nicoScripts.ban = [];
+  nicoScripts.replace = [];
   reverseActiveOwnerCache.clear();
   reverseActiveViewerCache.clear();
   speedActiveOwnerCache.clear();
@@ -783,21 +884,22 @@ iina.onMessage("load-danmaku", (data) => {
           const vposSec = comment.vposMs / 1000;
           const commands = comment.commands || [];
           const content = comment.body;
+          const mc = parseMailCommands(commands);
           
           if (isOwner) {
             processReverseScript(vposSec, content, commands);
             processSpeedScript(vposSec, content, commands);
             processBanScript(vposSec, content, commands);
+            processReplaceScript(vposSec, content, commands, mc);
           }
 
-          const mc = parseMailCommands(commands);
           const nicoscriptInvisible = isOwner && isNicoscript(content);
 
           if (isOwner) {
             processDefaultScript(vposSec, content, commands, mc);
           }
 
-          list.push({
+          const item = {
             t: vposSec,
             m: mc.mode,
             c: mc.color,
@@ -813,7 +915,9 @@ iina.onMessage("load-danmaku", (data) => {
             wakuColor: mc.wakuColor,
             fillColor: mc.fillColor,
             dmOpacity: mc.opacity
-          });
+          };
+          applyReplaceScripts(vposSec, item);
+          list.push(item);
         }
       }
     } catch (e) {
@@ -846,21 +950,22 @@ function parseXmlDanmaku(xmlStr) {
       const mail = el.getAttribute('mail') || "";
       const commands = mail.toLowerCase().split(/\s+/);
       const isOwner = !el.getAttribute('user_id');
+      const mc = parseMailCommands(commands);
 
       if (isOwner) {
         processReverseScript(vposSec, text, commands);
         processSpeedScript(vposSec, text, commands);
         processBanScript(vposSec, text, commands);
+        processReplaceScript(vposSec, text, commands, mc);
       }
 
-      const mc = parseMailCommands(commands);
       const nicoscriptInvisible = isOwner && isNicoscript(text);
 
       if (isOwner) {
         processDefaultScript(vposSec, text, commands, mc);
       }
 
-      list.push({
+      const item = {
         t: vposSec,
         m: mc.mode,
         c: mc.color,
@@ -876,7 +981,9 @@ function parseXmlDanmaku(xmlStr) {
         wakuColor: mc.wakuColor,
         fillColor: mc.fillColor,
         dmOpacity: mc.opacity
-      });
+      };
+      applyReplaceScripts(vposSec, item);
+      list.push(item);
     }
   } else {
     const regex = /<d p="([^"]+)">([\s\S]*?)<\/d>/g;
@@ -891,7 +998,7 @@ function parseXmlDanmaku(xmlStr) {
       const commands = p[5] ? p[5].toLowerCase().split(/\s+/) : [];
       processSpeedScript(vposSec, text, commands);
       const mc = parseMailCommands(commands);
-      list.push({
+      const item = {
         t: vposSec,
         m: parseInt(p[1]),
         c: "#" + colorVal.toString(16).padStart(6, '0'),
@@ -907,7 +1014,9 @@ function parseXmlDanmaku(xmlStr) {
         wakuColor: mc.wakuColor,
         fillColor: mc.fillColor,
         dmOpacity: mc.opacity
-      });
+      };
+      applyReplaceScripts(vposSec, item);
+      list.push(item);
     }
   }
   return list;
