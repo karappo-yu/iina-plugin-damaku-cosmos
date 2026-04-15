@@ -29,12 +29,11 @@ const NICO_COLORS = {
 };
 
 // --- 多层偏移常量 ---
-const MAX_OFFSET_LEVELS = 3;        // 0=正常层，1=偏移层1，2=偏移层2
-const OFFSET_STEP = 0.25;           // 每层视觉偏移（单位：lane）
+const MAX_OFFSET_LEVELS = 3;
+const OFFSET_STEP = 0.25;           // 可微调：0.22~0.28 之间最舒服
 
-// --- 动态轨道控制（现在是 2D 数组 [lane][level]）---
 let maxLanes = 0;
-let scrollLanes = []; 
+let scrollLanes = [];
 let topLanes = [];
 let bottomLanes = [];
 
@@ -70,48 +69,38 @@ function updateLanes() {
   }
 }
 
-/**
- * 获取按「最早释放时间」（Level 0 的 releaseTime）排序的可起始轨道列表
- * 用于所有层级查找，保证优先使用最早空闲的 base lane
- */
+/** 只在溢出时使用的「最早释放排序」 */
 function getSortedStartingLanes(lanes2d, lanesNeeded, isScroll) {
   const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
   const validStartsCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
   let infos = [];
-
   for (let start = 0; start < validStartsCount; start++) {
     let blockRelease = -Infinity;
     for (let k = 0; k < lanesNeeded; k++) {
       const sub = start + k;
-      let rel = isScroll
-        ? lanes2d[sub][0].tailEnterTime
-        : lanes2d[sub][0].leaveScreenTime;
+      let rel = isScroll ? lanes2d[sub][0].tailEnterTime : lanes2d[sub][0].leaveScreenTime;
       blockRelease = Math.max(blockRelease, rel);
     }
     infos.push({ startLane: start, releaseTime: blockRelease });
   }
-
   infos.sort((a, b) => a.releaseTime - b.releaseTime);
   return infos;
 }
 
-/**
- * 获取空闲的滚动轨道（全新多层偏移算法）
- */
+/** 滚动弹幕 - 新版轨道查找（无溢出时严格从上到下） */
 function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeeded) {
   const speed = (winW + textW) / durMs;
-  const tailEnterTimeNew = currentTime + (textW / speed) + 100;
   const headReachOneThirdTime = currentTime + (2 * winW / 3) / speed;
   const tailReachOneThirdTimeNew = currentTime + (2 * winW / 3 + textW) / speed;
 
-  const laneInfos = getSortedStartingLanes(lanesArr, lanesNeeded, true);
+  const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
+  const validStartsCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
 
-  // Level 0（正常层）：严格 1/3 防追尾
-  for (let info of laneInfos) {
-    const start = info.startLane;
+  // ==================== Level 0（正常层）：严格从上到下 ====================
+  for (let start = 0; start < validStartsCount; start++) {
     let enoughSpace = true;
     for (let k = 0; k < lanesNeeded; k++) {
-      const slot = lanesArr[start + k][0]; // Level 0
+      const slot = lanesArr[start + k][0];
       const isEntranceFree = currentTime >= slot.tailEnterTime;
       const isNoCatchUp = headReachOneThirdTime >= slot.tailReachOneThirdTime;
       if (!isEntranceFree || !isNoCatchUp) {
@@ -124,96 +113,19 @@ function getFreeScrollLane(lanesArr, textW, winW, durMs, currentTime, lanesNeede
     }
   }
 
-  // Level 1（偏移层1）：仅检查该层是否已被占用（强制塞入）
-  for (let info of laneInfos) {
-    const start = info.startLane;
-    let enoughSpace = true;
-    for (let k = 0; k < lanesNeeded; k++) {
-      const slot = lanesArr[start + k][1]; // Level 1
-      if (currentTime < slot.tailEnterTime) {
-        enoughSpace = false;
-        break;
-      }
-    }
-    if (enoughSpace) {
-      return { lane: start, forced: true, offsetLevel: 1 };
-    }
-  }
-
-  // Level 2（偏移层2）：同上
-  for (let info of laneInfos) {
-    const start = info.startLane;
-    let enoughSpace = true;
-    for (let k = 0; k < lanesNeeded; k++) {
-      const slot = lanesArr[start + k][2]; // Level 2
-      if (currentTime < slot.tailEnterTime) {
-        enoughSpace = false;
-        break;
-      }
-    }
-    if (enoughSpace) {
-      return { lane: start, forced: true, offsetLevel: 2 };
-    }
-  }
-
-  // 5. 所有层级都满了 → 找第一个 Level 0 未被占用的轨道（入口空闲）
-  for (let info of laneInfos) {
-    const start = info.startLane;
-    let level0NotUsed = true;
-    for (let k = 0; k < lanesNeeded; k++) {
-      const slot = lanesArr[start + k][0];
-      if (currentTime < slot.tailEnterTime) {
-        level0NotUsed = false;
-        break;
-      }
-    }
-    if (level0NotUsed) {
-      return { lane: start, forced: true, offsetLevel: 0 };
-    }
-  }
-
-  // 最终保底：强制 Level 0（最早的轨道）
-  if (laneInfos.length > 0) {
-    return { lane: laneInfos[0].startLane, forced: true, offsetLevel: 0 };
-  }
-  return null;
-}
-
-/**
- * 获取空闲的固定轨道（顶部/底部）—— 同多层偏移逻辑
- */
-function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
-  const leaveScreenTimeNew = currentTime + durMs;
-  const laneInfos = getSortedStartingLanes(lanesArr, lanesNeeded, false);
-
-  // Level 0（正常层）
-  for (let info of laneInfos) {
-    const start = info.startLane;
-    let enoughSpace = true;
-    for (let k = 0; k < lanesNeeded; k++) {
-      if (currentTime < lanesArr[start + k][0].leaveScreenTime) {
-        enoughSpace = false;
-        break;
-      }
-    }
-    if (enoughSpace) {
-      return { lane: start, forced: false, offsetLevel: 0 };
-    }
-  }
+  const laneInfos = getSortedStartingLanes(lanesArr, lanesNeeded, true);
 
   // Level 1（偏移层1）
   for (let info of laneInfos) {
     const start = info.startLane;
     let enoughSpace = true;
     for (let k = 0; k < lanesNeeded; k++) {
-      if (currentTime < lanesArr[start + k][1].leaveScreenTime) {
+      if (currentTime < lanesArr[start + k][1].tailEnterTime) {
         enoughSpace = false;
         break;
       }
     }
-    if (enoughSpace) {
-      return { lane: start, forced: true, offsetLevel: 1 };
-    }
+    if (enoughSpace) return { lane: start, forced: true, offsetLevel: 1 };
   }
 
   // Level 2（偏移层2）
@@ -221,36 +133,81 @@ function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
     const start = info.startLane;
     let enoughSpace = true;
     for (let k = 0; k < lanesNeeded; k++) {
-      if (currentTime < lanesArr[start + k][2].leaveScreenTime) {
+      if (currentTime < lanesArr[start + k][2].tailEnterTime) {
         enoughSpace = false;
         break;
       }
     }
-    if (enoughSpace) {
-      return { lane: start, forced: true, offsetLevel: 2 };
-    }
+    if (enoughSpace) return { lane: start, forced: true, offsetLevel: 2 };
   }
 
-  // 所有层级都满了 → 找第一个 Level 0 未被占用的轨道
+  // 最终保底：Level 0 强制（最早释放）
   for (let info of laneInfos) {
     const start = info.startLane;
     let level0NotUsed = true;
     for (let k = 0; k < lanesNeeded; k++) {
-      if (currentTime < lanesArr[start + k][0].leaveScreenTime) {
+      if (currentTime < lanesArr[start + k][0].tailEnterTime) {
         level0NotUsed = false;
         break;
       }
     }
-    if (level0NotUsed) {
-      return { lane: start, forced: true, offsetLevel: 0 };
+    if (level0NotUsed) return { lane: start, forced: true, offsetLevel: 0 };
+  }
+
+  return laneInfos.length ? { lane: laneInfos[0].startLane, forced: true, offsetLevel: 0 } : null;
+}
+
+/** 固定弹幕（顶部/底部）- 同逻辑 */
+function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
+  const leaveScreenTimeNew = currentTime + durMs;
+  const maxAvailableLanes = Math.floor(maxLanes * maxLaneRatio);
+  const validStartsCount = Math.max(1, maxAvailableLanes - lanesNeeded + 1);
+
+  // Level 0：严格从上到下
+  for (let start = 0; start < validStartsCount; start++) {
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][0].leaveScreenTime) {
+        enoughSpace = false;
+        break;
+      }
     }
+    if (enoughSpace) return { lane: start, forced: false, offsetLevel: 0 };
+  }
+
+  const laneInfos = getSortedStartingLanes(lanesArr, lanesNeeded, false);
+
+  // Level 1
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][1].leaveScreenTime) enoughSpace = false;
+    }
+    if (enoughSpace) return { lane: start, forced: true, offsetLevel: 1 };
+  }
+
+  // Level 2
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let enoughSpace = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][2].leaveScreenTime) enoughSpace = false;
+    }
+    if (enoughSpace) return { lane: start, forced: true, offsetLevel: 2 };
   }
 
   // 最终保底
-  if (laneInfos.length > 0) {
-    return { lane: laneInfos[0].startLane, forced: true, offsetLevel: 0 };
+  for (let info of laneInfos) {
+    const start = info.startLane;
+    let level0NotUsed = true;
+    for (let k = 0; k < lanesNeeded; k++) {
+      if (currentTime < lanesArr[start + k][0].leaveScreenTime) level0NotUsed = false;
+    }
+    if (level0NotUsed) return { lane: start, forced: true, offsetLevel: 0 };
   }
-  return null;
+
+  return laneInfos.length ? { lane: laneInfos[0].startLane, forced: true, offsetLevel: 0 } : null;
 }
 
 function createDanmaku(d, currentTime = null) {
