@@ -68,6 +68,88 @@ const NICO_COLORS = {
   purple2: '#6633CC', black2: '#666666'
 };
 
+const NICO_FONTS = {
+  gothic: '"Hiragino Sans", "Yu Gothic", "游ゴシック体", sans-serif',
+  mincho: '"Hiragino Mincho ProN", "Yu Mincho", "游明朝体", serif',
+  gulim: 'Gulim, "Hiragino Sans", sans-serif',
+  simsun: 'SimSun, "Hiragino Mincho ProN", serif'
+};
+
+function resolveColor(val) {
+  if (!val) return null;
+  const lower = val.toLowerCase();
+  if (NICO_COLORS[lower]) return NICO_COLORS[lower];
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(val)) return val.toUpperCase();
+  return null;
+}
+
+const RE_NICOSCRIPT = /^[@\uff20]\S+/;
+
+function isNicoscript(content) {
+  return RE_NICOSCRIPT.test(content);
+}
+
+function parseMailCommands(commands) {
+  let mode = 1;
+  let size = 25;
+  let color = '#FFFFFF';
+  let colorSet = false;
+  let locSet = false;
+  let font = null;
+  let invisible = false;
+  let live = false;
+  let full = false;
+  let ender = false;
+  let strokeColor = null;
+  let wakuColor = null;
+  let fillColor = null;
+  let opacity = null;
+
+  for (const raw of commands) {
+    const c = raw.toLowerCase();
+
+    if (!locSet) {
+      if (c === 'naka') { mode = 1; locSet = true; continue; }
+      if (c === 'shita') { mode = 4; locSet = true; continue; }
+      if (c === 'ue') { mode = 5; locSet = true; continue; }
+    }
+
+    if (c === 'big' && size === 25) { size = 36; continue; }
+    if (c === 'small' && size === 25) { size = 15; continue; }
+
+    if (!font && (c === 'gothic' || c === 'mincho' || c === 'gulim' || c === 'simsun')) {
+      font = c; continue;
+    }
+
+    if (c === 'invisible') { invisible = true; continue; }
+    if (c === '_live') { live = true; continue; }
+    if (c === 'full') { full = true; continue; }
+    if (c === 'ender') { ender = true; continue; }
+
+    if (c.startsWith('nico:stroke:') && !strokeColor) {
+      strokeColor = resolveColor(raw.slice(12)); continue;
+    }
+    if (c.startsWith('nico:waku:') && !wakuColor) {
+      wakuColor = resolveColor(raw.slice(10)); continue;
+    }
+    if (c.startsWith('nico:fill:') && !fillColor) {
+      fillColor = resolveColor(raw.slice(10)); continue;
+    }
+    if (c.startsWith('nico:opacity:') && opacity === null) {
+      const v = parseFloat(c.slice(13));
+      if (!isNaN(v) && v >= 0 && v <= 1) opacity = v;
+      continue;
+    }
+
+    if (!colorSet) {
+      if (NICO_COLORS[c]) { color = NICO_COLORS[c]; colorSet = true; }
+      else if (raw.startsWith('#') && (raw.length === 7 || raw.length === 4)) { color = raw; colorSet = true; }
+    }
+  }
+
+  return { mode, size, color, font, invisible, live, full, ender, strokeColor, wakuColor, fillColor, opacity };
+}
+
 // --- 多层偏移常量 ---
 const MAX_OFFSET_LEVELS = 3;
 const OFFSET_STEP = 0.25;           // 可微调：0.22~0.28 之间最舒服
@@ -75,7 +157,9 @@ const OFFSET_STEP = 0.25;           // 可微调：0.22~0.28 之间最舒服
 // --- 倒放脚本状态 ---
 const nicoScripts = {
   reverse: [],
-  speed: []  // { start, end, multiplier }
+  speed: [],
+  default: [],
+  ban: []
 };
 let reverseActiveOwnerCache = new Map();
 let reverseActiveViewerCache = new Map();
@@ -122,7 +206,7 @@ function isReverseActive(vposSec, isOwner) {
     ) {
       continue;
     }
-    if (range.start <= vposSec && vposSec <= range.end) {
+    if (range.start < vposSec && vposSec < range.end) {
       result = true;
       break;
     }
@@ -168,7 +252,7 @@ function getSpeedMultiplier(vposSec, isOwner) {
   
   let multiplier = 1;
   for (const range of nicoScripts.speed) {
-    if (range.start <= vposSec && vposSec <= range.end) {
+    if (range.start < vposSec && vposSec < range.end) {
       multiplier = range.multiplier;
       break;
     }
@@ -176,6 +260,75 @@ function getSpeedMultiplier(vposSec, isOwner) {
   
   cache.set(vposSec, multiplier);
   return multiplier;
+}
+
+const RE_DEFAULT = /^[@\uff20]\u30c7\u30d5\u30a9\u30eb\u30c8/;
+
+function processDefaultScript(vposSec, content, commands, mc) {
+  if (!RE_DEFAULT.test(content)) return;
+
+  let durationSec = 30;
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationSec = parseInt(durationMatch[1], 10);
+      break;
+    }
+  }
+
+  nicoScripts.default.unshift({
+    start: vposSec,
+    end: vposSec + durationSec,
+    color: mc.color !== '#FFFFFF' ? mc.color : null,
+    size: mc.size !== 25 ? mc.size : null,
+    font: mc.font,
+    loc: mc.mode !== 1 ? mc.mode : null
+  });
+}
+
+function getDefaultCommand(vposSec) {
+  nicoScripts.default = nicoScripts.default.filter(
+    item => !item.end || item.end >= vposSec
+  );
+
+  let color = null, size = null, font = null, loc = null;
+  for (const item of nicoScripts.default) {
+    if (item.start < vposSec && vposSec < item.end) {
+      if (item.loc && loc === null) loc = item.loc;
+      if (item.color && color === null) color = item.color;
+      if (item.size && size === null) size = item.size;
+      if (item.font && font === null) font = item.font;
+      if (loc && color && size && font) break;
+    }
+  }
+  return { color, size, font, loc };
+}
+
+const RE_BAN = /^[@\uff20]\u30b3\u30e1\u30f3\u30c8\u7981\u6b62/;
+
+function processBanScript(vposSec, content, commands) {
+  if (!RE_BAN.test(content)) return;
+
+  let durationSec = 30;
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationSec = parseInt(durationMatch[1], 10);
+      break;
+    }
+  }
+
+  nicoScripts.ban.unshift({
+    start: vposSec,
+    end: vposSec + durationSec
+  });
+}
+
+function isBanActive(vposSec) {
+  for (const range of nicoScripts.ban) {
+    if (range.start < vposSec && vposSec < range.end) return true;
+  }
+  return false;
 }
 
 // --- 动态轨道控制（现在是 2D 数组 [lane][level]）---
@@ -360,15 +513,26 @@ function getFreeFixedLane(lanesArr, durMs, currentTime, lanesNeeded) {
 function createDanmaku(d, currentTime = null) {
   if (!danmakuVisible) return;
 
-  const isScroll = d.m >= 1 && d.m <= 3;
-  const isBottom = d.m === 4;
-  const isTop = d.m === 5;
+  if (d.invisible) return;
+
+  if (isBanActive(d.t)) return;
+
+  const defCmd = getDefaultCommand(d.t);
+  const effectiveMode = defCmd.loc || d.m;
+  const effectiveColor = defCmd.color || d.c;
+  const effectiveSize = defCmd.size || d.size;
+  const effectiveFont = defCmd.font || d.font;
+
+  const isScroll = effectiveMode >= 1 && effectiveMode <= 3;
+  const isReverseScroll = effectiveMode === 6;
+  const isBottom = effectiveMode === 4;
+  const isTop = effectiveMode === 5;
   
-  if (isScroll && window._blockScroll) return;
+  if ((isScroll || isReverseScroll) && window._blockScroll) return;
   if (isTop && window._blockTop) return;
   if (isBottom && window._blockBottom) return;
 
-  const durMs = isScroll ? scrollDuration : fixedDuration;
+  const durMs = (isScroll || isReverseScroll) ? scrollDuration : fixedDuration;
   const speedMult = getSpeedMultiplier(d.t, d._isOwner);
   const adjustedDurMs = durMs / speedMult;
   const videoTimeMs = d.t * 1000;
@@ -379,21 +543,56 @@ function createDanmaku(d, currentTime = null) {
   const el = document.createElement('div');
   el.className = 'dm-item';
   el.textContent = d.text;
-  el.style.color = d.c;
-  el.dataset.size = d.size;
-  const danmakuFs = ((d.size / 25) * (100 / 15) * fontScale).toFixed(4) + 'vh';
+  el.style.color = effectiveColor;
+  el.dataset.size = effectiveSize;
+  const danmakuFs = ((effectiveSize / 25) * (100 / 15) * fontScale).toFixed(4) + 'vh';
   el.style.fontSize = danmakuFs;
-  if (d.c === '#000000' || d.c === 'black' || d.c === 'rgb(0,0,0)') {
+
+  if (effectiveFont && NICO_FONTS[effectiveFont]) {
+    el.style.fontFamily = NICO_FONTS[effectiveFont];
+    if (effectiveFont === 'mincho' || effectiveFont === 'simsun') {
+      el.style.fontWeight = '400';
+    }
+  }
+
+  if (d.strokeColor) {
+    el.style.webkitTextStroke = `0.16vw ${d.strokeColor}`;
+  } else if (d.c === '#000000' || d.c === 'black' || d.c === 'rgb(0,0,0)') {
     el.style.webkitTextStroke = '0.03vw rgba(255,255,255,0.7)';
   }
 
-  if (isScroll) el.classList.add('dm-scroll');
+  if (d.wakuColor) {
+    el.style.border = `1px solid ${d.wakuColor}`;
+  }
+
+  if (d.fillColor) {
+    el.style.backgroundColor = d.fillColor;
+  }
+
+  if (d.dmOpacity !== null && d.dmOpacity !== undefined) {
+    el.style.setProperty('--dm-opacity', d.dmOpacity);
+    el.classList.add('dm-custom-opacity');
+  }
+
+  if (d.live) {
+    el.classList.add('dm-live');
+  }
+
+  if (d.full) {
+    el.classList.add('dm-full');
+  }
+
+  if (d.ender) {
+    el.classList.add('dm-ender');
+  }
+
+  if (isScroll || isReverseScroll) el.classList.add('dm-scroll');
   else if (isBottom) el.classList.add('dm-bottom');
   else if (isTop) el.classList.add('dm-top');
 
   container.appendChild(el);
 
-  if (isBottom || isTop) {
+  if ((isBottom || isTop) && !d.ender) {
     setTimeout(() => el.classList.add('priority-low'), adjustedDurMs / 2);
   }
 
@@ -402,7 +601,7 @@ function createDanmaku(d, currentTime = null) {
   }
   const textW = d._textW;
   const winW = window.innerWidth;
-  const lanesNeeded = Math.ceil(d.size / 25);
+  const lanesNeeded = Math.ceil(effectiveSize / 25);
 
   // ========== 轨道分配 ==========
   let lane = d._lane;
@@ -417,7 +616,7 @@ function createDanmaku(d, currentTime = null) {
     }
   } else {
     let result = null;
-    if (isScroll) {
+    if (isScroll || isReverseScroll) {
       result = getFreeScrollLane(scrollLanes, textW, winW, adjustedDurMs, videoTimeMs, lanesNeeded);
     } else if (isTop) {
       result = getFreeFixedLane(topLanes, adjustedDurMs, videoTimeMs, lanesNeeded);
@@ -442,7 +641,7 @@ function createDanmaku(d, currentTime = null) {
   }
 
   // ========== 统一更新轨道占用状态（记忆或新分配都走这里）==========
-  if (isScroll) {
+  if (isScroll || isReverseScroll) {
     const speed = (winW + textW) / durMs;
     const tailEnterTime = videoTimeMs + (textW / speed) + 100;
     const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
@@ -466,7 +665,7 @@ function createDanmaku(d, currentTime = null) {
   // ========== 视觉定位（带偏移）==========
   const laneHeightVh = 100 / maxLanes;
   let visualTop = lane + offsetLevel * OFFSET_STEP;
-  if (isScroll || isTop) {
+  if (isScroll || isReverseScroll || isTop) {
     el.style.top = `${visualTop * laneHeightVh}vh`;
   } else if (isBottom) {
     const visualBottom = Math.max(0, lane - offsetLevel * OFFSET_STEP);
@@ -476,9 +675,9 @@ function createDanmaku(d, currentTime = null) {
   el.style.setProperty('--dur', `${adjustedDurMs}ms`);
   el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
-  const isReverse = isReverseActive(videoTimeMs / 1000, d._isOwner);
+  const isReverse = isReverseScroll || isReverseActive(videoTimeMs / 1000, d._isOwner);
 
-  if (isScroll) {
+  if (isScroll || isReverseScroll) {
     if (isReverse) {
       el.style.setProperty('--start-x', `-100%`);
       el.style.setProperty('--end-x', `100vw`);
@@ -487,7 +686,7 @@ function createDanmaku(d, currentTime = null) {
       el.style.setProperty('--end-x', `-100%`);
     }
   } else {
-    const maxW = winW * 0.95;
+    const maxW = d.full ? winW : winW * 0.95;
     if (textW > maxW) {
       el.style.transform = `translateX(-50%) scaleX(${maxW / textW})`;
     } else {
@@ -495,7 +694,7 @@ function createDanmaku(d, currentTime = null) {
     }
   }
 
-  const item = { el, d, type: isScroll ? 'scroll' : 'fixed' };
+  const item = { el, d, type: (isScroll || isReverseScroll) ? 'scroll' : 'fixed' };
   activeDanmaku.add(item);
 
   el.addEventListener('animationend', () => {
@@ -519,7 +718,7 @@ function handleSeek(timeSec) {
   let tempIndex = currentIndex;
   while (tempIndex < allDanmaku.length && allDanmaku[tempIndex].t <= timeSec) {
     const d = allDanmaku[tempIndex];
-    const typeDur = (d.m >= 1 && d.m <= 3) ? scrollDuration : fixedDuration;
+    const typeDur = (d.m >= 1 && d.m <= 6) ? scrollDuration : fixedDuration;
     if (timeSec - d.t < typeDur / 1000) {
       createDanmaku(d, timeSec); 
     }
@@ -561,6 +760,8 @@ iina.onMessage("load-danmaku", (data) => {
   
   nicoScripts.reverse = [];
   nicoScripts.speed = [];
+  nicoScripts.default = [];
+  nicoScripts.ban = [];
   reverseActiveOwnerCache.clear();
   reverseActiveViewerCache.clear();
   speedActiveOwnerCache.clear();
@@ -586,36 +787,32 @@ iina.onMessage("load-danmaku", (data) => {
           if (isOwner) {
             processReverseScript(vposSec, content, commands);
             processSpeedScript(vposSec, content, commands);
+            processBanScript(vposSec, content, commands);
           }
-          
-          let mode = 1;
-          if (commands.includes('shita')) mode = 4;
-          else if (commands.includes('ue')) mode = 5;
-          
-          let size = 25;
-          if (commands.includes('big')) size = 36;
-          else if (commands.includes('small')) size = 15;
-          
-          let color = '#FFFFFF';
-          for (const cmd of commands) {
-            const colorLower = cmd.toLowerCase();
-            if (NICO_COLORS[colorLower]) {
-              color = NICO_COLORS[colorLower];
-              break;
-            }
-            if (cmd.startsWith('#') && (cmd.length === 7 || cmd.length === 4)) {
-              color = cmd;
-              break;
-            }
+
+          const mc = parseMailCommands(commands);
+          const nicoscriptInvisible = isOwner && isNicoscript(content);
+
+          if (isOwner) {
+            processDefaultScript(vposSec, content, commands, mc);
           }
-          
+
           list.push({
             t: vposSec,
-            m: mode,
-            c: color,
+            m: mc.mode,
+            c: mc.color,
             text: content,
-            size: size,
-            _isOwner: isOwner
+            size: mc.size,
+            _isOwner: isOwner,
+            font: mc.font,
+            invisible: mc.invisible || nicoscriptInvisible,
+            live: mc.live,
+            full: mc.full,
+            ender: mc.ender,
+            strokeColor: mc.strokeColor,
+            wakuColor: mc.wakuColor,
+            fillColor: mc.fillColor,
+            dmOpacity: mc.opacity
           });
         }
       }
@@ -648,36 +845,37 @@ function parseXmlDanmaku(xmlStr) {
       const vposSec = vpos / 100;
       const mail = el.getAttribute('mail') || "";
       const commands = mail.toLowerCase().split(/\s+/);
+      const isOwner = !el.getAttribute('user_id');
 
-      processSpeedScript(vposSec, text, commands);
+      if (isOwner) {
+        processReverseScript(vposSec, text, commands);
+        processSpeedScript(vposSec, text, commands);
+        processBanScript(vposSec, text, commands);
+      }
 
-      let mode = 1;
-      if (commands.includes('shita')) mode = 4;
-      else if (commands.includes('ue')) mode = 5;
+      const mc = parseMailCommands(commands);
+      const nicoscriptInvisible = isOwner && isNicoscript(text);
 
-      let size = 25;
-      if (commands.includes('big')) size = 36;
-      else if (commands.includes('small')) size = 15;
-
-      let color = '#FFFFFF';
-      for (const cmd of commands) {
-        if (NICO_COLORS[cmd]) {
-          color = NICO_COLORS[cmd];
-          break;
-        }
-        if (cmd.startsWith('#') && (cmd.length === 7 || cmd.length === 4)) {
-          color = cmd;
-          break;
-        }
+      if (isOwner) {
+        processDefaultScript(vposSec, text, commands, mc);
       }
 
       list.push({
         t: vposSec,
-        m: mode,
-        c: color,
+        m: mc.mode,
+        c: mc.color,
         text: text,
-        size: size,
-        _isOwner: true
+        size: mc.size,
+        _isOwner: isOwner,
+        font: mc.font,
+        invisible: mc.invisible || nicoscriptInvisible,
+        live: mc.live,
+        full: mc.full,
+        ender: mc.ender,
+        strokeColor: mc.strokeColor,
+        wakuColor: mc.wakuColor,
+        fillColor: mc.fillColor,
+        dmOpacity: mc.opacity
       });
     }
   } else {
@@ -692,13 +890,23 @@ function parseXmlDanmaku(xmlStr) {
       const text = match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<\/d/, '');
       const commands = p[5] ? p[5].toLowerCase().split(/\s+/) : [];
       processSpeedScript(vposSec, text, commands);
+      const mc = parseMailCommands(commands);
       list.push({
         t: vposSec,
         m: parseInt(p[1]),
         c: "#" + colorVal.toString(16).padStart(6, '0'),
         text: text,
         size: danmakuSize,
-        _isOwner: true
+        _isOwner: true,
+        font: mc.font,
+        invisible: mc.invisible,
+        live: mc.live,
+        full: mc.full,
+        ender: mc.ender,
+        strokeColor: mc.strokeColor,
+        wakuColor: mc.wakuColor,
+        fillColor: mc.fillColor,
+        dmOpacity: mc.opacity
       });
     }
   }
@@ -713,7 +921,7 @@ iina.onMessage("resize", () => {
     if (item.type === 'fixed') {
       const winW = window.innerWidth;
       const textW = item.el.offsetWidth;
-      const maxW = winW * 0.95;
+      const maxW = item.d.full ? winW : winW * 0.95;
       if (textW > maxW) {
         item.el.style.transform = `translateX(-50%) scaleX(${maxW / textW})`;
       } else {

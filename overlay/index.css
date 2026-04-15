@@ -83,6 +83,26 @@ html, body {
   z-index: 10;
 }
 
+/* 实时弹幕：半透明 */
+.dm-item.dm-live {
+  --global-opacity: 0.5;
+}
+
+/* 自定义透明度 */
+.dm-item.dm-custom-opacity {
+  opacity: var(--dm-opacity) !important;
+}
+
+/* 全屏弹幕：固定弹幕允许使用全屏宽度 */
+.dm-item.dm-full {
+  max-width: 100vw;
+}
+
+/* 终点弹幕：不降级优先级，始终保持高层级 */
+.dm-item.dm-ender {
+  z-index: 35 !important;
+}
+
 /* 核心动画引擎：全程 GPU 加速 */
 @keyframes scroll-anim {
   from { transform: translateX(var(--start-x)); }
@@ -90,7 +110,7 @@ html, body {
 }
 
 @keyframes fixed-anim {
-  0%    { opacity: var(--final-opacity); }
-  99.9% { opacity: var(--final-opacity); }
+  0%    { opacity: 1; }
+  99.9% { opacity: 1; }
   100%  { opacity: 0; visibility: hidden; }
 }
