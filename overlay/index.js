@@ -205,6 +205,11 @@ function createDanmaku(d, currentTime = null) {
   el.dataset.size = d.size;
   const danmakuFs = (d.size * fontScale / _refWidth * 100).toFixed(4) + 'vw';
   el.style.fontSize = danmakuFs;
+  // 黑色弹幕：白边 + 保留原有黑边
+  if (d.c === '#000000' || d.c === 'black' || d.c === 'rgb(0,0,0)') {
+    el.style.webkitTextStroke = '0.03vw rgba(255,255,255,0.7)';
+    el.style.filter = 'drop-shadow(0 0 0.1vw rgba(0,0,0,0.4)) drop-shadow(0 0 0.05vw rgba(255,255,255,0.3))';
+  }
 
   if (isScroll) el.classList.add('dm-scroll');
   else if (isBottom) el.classList.add('dm-bottom');
