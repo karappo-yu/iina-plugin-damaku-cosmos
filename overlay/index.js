@@ -15,7 +15,7 @@ let fixedDuration = 4000;
 let fontScale = 1.0;
 let blockForceLane = false; // 过滤强制分配轨道的弹幕（溢出弹幕）
 let maxLaneRatio = 1.0; // 限制轨道数比例，1.0 = 全部轨道，0.5 = 只用上半部分
-const _refWidth = 1920; 
+const _refHeight = 1080; 
 
 // --- Nico 专属颜色映射表 (Niconico Color Dict) ---
 const NICO_COLORS = {
@@ -54,14 +54,8 @@ function clearDanmakuCaches() {
 }
 
 function updateLanes() {
-  const winH = window.innerHeight;
-  const winW = window.innerWidth;
-  const refScale = winW / _refWidth;
-  const baseSize = 25 * fontScale;
-  // Nico 弹幕通常排列非常紧密，行距极小
-  const laneHeight = baseSize * refScale * 1.1; 
-
-  const newMaxLanes = Math.max(1, Math.floor(winH / laneHeight));
+  const laneHeightVh = (100 / 15) * 1.1 * fontScale;
+  const newMaxLanes = Math.max(1, Math.floor(100 / laneHeightVh));
 
   if (newMaxLanes !== maxLanes) {
     maxLanes = newMaxLanes;
@@ -202,7 +196,7 @@ function createDanmaku(d, currentTime = null) {
   el.textContent = d.text;
   el.style.color = d.c;
   el.dataset.size = d.size;
-  const danmakuFs = (d.size * fontScale / _refWidth * 100).toFixed(4) + 'vw';
+  const danmakuFs = ((d.size / 25) * (100 / 15) * fontScale).toFixed(4) + 'vh';
   el.style.fontSize = danmakuFs;
   // 黑色弹幕：白边增强可见性
   if (d.c === '#000000' || d.c === 'black' || d.c === 'rgb(0,0,0)') {
