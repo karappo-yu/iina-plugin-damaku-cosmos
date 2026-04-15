@@ -19,7 +19,7 @@ function reverseAllActiveDanmaku(newReverseState) {
     const durMs = (d.m >= 1 && d.m <= 3) ? scrollDuration : fixedDuration;
     const currentSpeedMult = getSpeedMultiplier(lastTime, d._isOwner);
     const adjustedDurMs = durMs / currentSpeedMult;
-    const elapsedMs = (lastTime - d.t) * 1000;
+    const elapsedMs = (lastTime - d.t) * 10;
     const remainingMs = adjustedDurMs - elapsedMs;
     
     const rect = el.getBoundingClientRect();
@@ -170,33 +170,33 @@ let speedActiveViewerCache = new Map();
 // --- 倒放脚本解析 ---
 const RE_REVERSE = /^@\u9006(?:\s+)?(\u5168|\u30b3\u30e1|\u6295\u30b3\u30e1)?/;
 
-function processReverseScript(vposSec, content, commands) {
+function processReverseScript(vpos, content, commands) {
   const reverseMatch = RE_REVERSE.exec(content);
   if (!reverseMatch) return;
   
   const target = reverseMatch[1] || "\u5168";
-  let durationSec = 30;
+  let durationVpos = 3000;
   
   for (const cmd of commands) {
     const durationMatch = /^@(\d+)$/.exec(cmd);
     if (durationMatch) {
-      durationSec = parseInt(durationMatch[1], 10);
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
       break;
     }
   }
   
   nicoScripts.reverse.unshift({
-    start: vposSec,
-    end: vposSec + durationSec,
+    start: vpos,
+    end: vpos + durationVpos,
     target: target
   });
   reverseActiveOwnerCache.clear();
   reverseActiveViewerCache.clear();
 }
 
-function isReverseActive(vposSec, isOwner) {
+function isReverseActive(vpos, isOwner) {
   const cache = isOwner ? reverseActiveOwnerCache : reverseActiveViewerCache;
-  const cached = cache.get(vposSec);
+  const cached = cache.get(vpos);
   if (cached !== undefined) return cached;
   
   let result = false;
@@ -207,13 +207,13 @@ function isReverseActive(vposSec, isOwner) {
     ) {
       continue;
     }
-    if (range.start < vposSec && vposSec < range.end) {
+    if (range.start < vpos && vpos < range.end) {
       result = true;
       break;
     }
   }
   
-  cache.set(vposSec, result);
+  cache.set(vpos, result);
   return result;
 }
 
@@ -221,65 +221,65 @@ function isReverseActive(vposSec, isOwner) {
 const RE_SPEED_UP = /^@\u901f\u3044/;      // @速い
 const RE_SPEED_DOWN = /^@\u9045\u3044/;    // @遅い
 
-function processSpeedScript(vposSec, content, commands) {
+function processSpeedScript(vpos, content, commands) {
   const speedUpMatch = RE_SPEED_UP.exec(content);
   const speedDownMatch = RE_SPEED_DOWN.exec(content);
   if (!speedUpMatch && !speedDownMatch) return;
   
   const isSpeedUp = !!speedUpMatch;
-  let durationSec = 30;
+  let durationVpos = 3000;
   
   for (const cmd of commands) {
     const durationMatch = /^@(\d+)$/.exec(cmd);
     if (durationMatch) {
-      durationSec = parseInt(durationMatch[1], 10);
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
       break;
     }
   }
   
   nicoScripts.speed.unshift({
-    start: vposSec,
-    end: vposSec + durationSec,
+    start: vpos,
+    end: vpos + durationVpos,
     multiplier: isSpeedUp ? 2 : 0.5
   });
   speedActiveOwnerCache.clear();
   speedActiveViewerCache.clear();
 }
 
-function getSpeedMultiplier(vposSec, isOwner) {
+function getSpeedMultiplier(vpos, isOwner) {
   const cache = isOwner ? speedActiveOwnerCache : speedActiveViewerCache;
-  const cached = cache.get(vposSec);
+  const cached = cache.get(vpos);
   if (cached !== undefined) return cached;
   
   let multiplier = 1;
   for (const range of nicoScripts.speed) {
-    if (range.start < vposSec && vposSec < range.end) {
+    if (range.start < vpos && vpos < range.end) {
       multiplier = range.multiplier;
       break;
     }
   }
   
-  cache.set(vposSec, multiplier);
+  cache.set(vpos, multiplier);
   return multiplier;
 }
 
 const RE_DEFAULT = /^[@\uff20]\u30c7\u30d5\u30a9\u30eb\u30c8/;
 
-function processDefaultScript(vposSec, content, commands, mc) {
+function processDefaultScript(vpos, content, commands, mc) {
   if (!RE_DEFAULT.test(content)) return;
 
-  let durationSec = 30;
+  let durationVpos = 3000;
   for (const cmd of commands) {
     const durationMatch = /^@(\d+)$/.exec(cmd);
     if (durationMatch) {
-      durationSec = parseInt(durationMatch[1], 10);
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
       break;
     }
   }
 
   nicoScripts.default.unshift({
-    start: vposSec,
-    end: vposSec + durationSec,
+    start: vpos,
+    end: vpos + durationVpos,
     color: mc.color !== '#FFFFFF' ? mc.color : null,
     size: mc.size !== 25 ? mc.size : null,
     font: mc.font,
@@ -287,14 +287,14 @@ function processDefaultScript(vposSec, content, commands, mc) {
   });
 }
 
-function getDefaultCommand(vposSec) {
+function getDefaultCommand(vpos) {
   nicoScripts.default = nicoScripts.default.filter(
-    item => !item.end || item.end >= vposSec
+    item => !item.end || item.end >= vpos
   );
 
   let color = null, size = null, font = null, loc = null;
   for (const item of nicoScripts.default) {
-    if (item.start < vposSec && vposSec < item.end) {
+    if (item.start < vpos && vpos < item.end) {
       if (item.loc && loc === null) loc = item.loc;
       if (item.color && color === null) color = item.color;
       if (item.size && size === null) size = item.size;
@@ -307,27 +307,27 @@ function getDefaultCommand(vposSec) {
 
 const RE_BAN = /^[@\uff20]\u30b3\u30e1\u30f3\u30c8\u7981\u6b62/;
 
-function processBanScript(vposSec, content, commands) {
+function processBanScript(vpos, content, commands) {
   if (!RE_BAN.test(content)) return;
 
-  let durationSec = 30;
+  let durationVpos = 3000;
   for (const cmd of commands) {
     const durationMatch = /^@(\d+)$/.exec(cmd);
     if (durationMatch) {
-      durationSec = parseInt(durationMatch[1], 10);
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
       break;
     }
   }
 
   nicoScripts.ban.unshift({
-    start: vposSec,
-    end: vposSec + durationSec
+    start: vpos,
+    end: vpos + durationVpos
   });
 }
 
-function isBanActive(vposSec) {
+function isBanActive(vpos) {
   for (const range of nicoScripts.ban) {
-    if (range.start < vposSec && vposSec < range.end) return true;
+    if (range.start < vpos && vpos < range.end) return true;
   }
   return false;
 }
@@ -363,14 +363,14 @@ function splitQuotedString(str) {
   return result;
 }
 
-function processReplaceScript(vposSec, content, commands, mc) {
+function processReplaceScript(vpos, content, commands, mc) {
   if (!RE_REPLACE.test(content)) return;
 
-  let durationSec = 30;
+  let durationVpos = 3000;
   for (const cmd of commands) {
     const durationMatch = /^@(\d+)$/.exec(cmd);
     if (durationMatch) {
-      durationSec = parseInt(durationMatch[1], 10);
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
       break;
     }
   }
@@ -383,8 +383,8 @@ function processReplaceScript(vposSec, content, commands, mc) {
   const condition = validConditions.includes(params[4]) ? params[4] : '部分一致';
 
   nicoScripts.replace.unshift({
-    start: vposSec,
-    end: vposSec + durationSec,
+    start: vpos,
+    end: vpos + durationVpos,
     keyword: params[0] ?? '',
     replace: params[1] ?? '',
     range: params[2] === '全' ? '全' : '単',
@@ -401,14 +401,14 @@ function processReplaceScript(vposSec, content, commands, mc) {
   );
 }
 
-function applyReplaceScripts(vposSec, danmaku) {
+function applyReplaceScripts(vpos, danmaku) {
   nicoScripts.replace = nicoScripts.replace.filter(
-    item => !item.end || item.end >= vposSec
+    item => !item.end || item.end >= vpos
   );
 
   for (const rule of nicoScripts.replace) {
-    if (rule.start > vposSec) continue;
-    if (rule.end && rule.end <= vposSec) continue;
+    if (rule.start > vpos) continue;
+    if (rule.end && rule.end <= vpos) continue;
 
     if ((rule.target === 'コメ' || rule.target === '含まない') && danmaku._isOwner) continue;
     if (rule.target === '投コメ' && !danmaku._isOwner) continue;
@@ -635,8 +635,8 @@ function createDanmaku(d, currentTime = null) {
   const durMs = (isScroll || isReverseScroll) ? scrollDuration : fixedDuration;
   const speedMult = getSpeedMultiplier(d.t, d._isOwner);
   const adjustedDurMs = durMs / speedMult;
-  const videoTimeMs = d.t * 1000;
-  const elapsedMs = currentTime !== null ? (currentTime - d.t) * 1000 : 0;
+  const videoTimeMs = d.t * 10;
+  const elapsedMs = currentTime !== null ? (currentTime - d.t) * 10 : 0;
   
   if (elapsedMs >= adjustedDurMs || elapsedMs < 0) return;
 
@@ -775,7 +775,7 @@ function createDanmaku(d, currentTime = null) {
   el.style.setProperty('--dur', `${adjustedDurMs}ms`);
   el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
-  const isReverse = isReverseScroll || isReverseActive(videoTimeMs / 1000, d._isOwner);
+  const isReverse = isReverseScroll || isReverseActive(d.t, d._isOwner);
 
   if (isScroll || isReverseScroll) {
     if (isReverse) {
@@ -804,34 +804,34 @@ function createDanmaku(d, currentTime = null) {
 }
 
 // 其余函数保持不变（handleSeek、iina 消息处理等）
-function handleSeek(timeSec) {
+function handleSeek(timeVpos) {
   container.innerHTML = '';
   activeDanmaku.clear();
   
   resetLaneData();
   updateLanes();
   
-  const durSec = Math.max(scrollDuration, fixedDuration) / 1000;
-  currentIndex = allDanmaku.findIndex(d => d.t >= timeSec - durSec);
+  const durVpos = Math.max(scrollDuration, fixedDuration) / 10;
+  currentIndex = allDanmaku.findIndex(d => d.t >= timeVpos - durVpos);
   if (currentIndex === -1) currentIndex = allDanmaku.length;
 
   let tempIndex = currentIndex;
-  while (tempIndex < allDanmaku.length && allDanmaku[tempIndex].t <= timeSec) {
+  while (tempIndex < allDanmaku.length && allDanmaku[tempIndex].t <= timeVpos) {
     const d = allDanmaku[tempIndex];
     const typeDur = (d.m >= 1 && d.m <= 6) ? scrollDuration : fixedDuration;
-    if (timeSec - d.t < typeDur / 1000) {
-      createDanmaku(d, timeSec); 
+    if (timeVpos - d.t < typeDur / 10) {
+      createDanmaku(d, timeVpos); 
     }
     tempIndex++;
   }
   currentIndex = tempIndex;
   
-  lastReverseState = isReverseActive(timeSec, false);
+  lastReverseState = isReverseActive(timeVpos, false);
 }
 
 iina.onMessage("time-update", (data) => {
-  let t = data.time;
-  if (Math.abs(t - lastTime) > 1.5) {
+  let t = data.time * 100;
+  if (Math.abs(t - lastTime) > 150) {
     handleSeek(t);
   } else if (!isPaused) {
     while (currentIndex < allDanmaku.length && allDanmaku[currentIndex].t <= t) {
@@ -881,26 +881,26 @@ iina.onMessage("load-danmaku", (data) => {
         const isOwner = thread.fork === 'owner';
         for (const comment of thread.comments) {
           if (!comment.body) continue;
-          const vposSec = comment.vposMs / 1000;
+          const vpos = comment.vposMs / 10;
           const commands = comment.commands || [];
           const content = comment.body;
           const mc = parseMailCommands(commands);
           
           if (isOwner) {
-            processReverseScript(vposSec, content, commands);
-            processSpeedScript(vposSec, content, commands);
-            processBanScript(vposSec, content, commands);
-            processReplaceScript(vposSec, content, commands, mc);
+            processReverseScript(vpos, content, commands);
+            processSpeedScript(vpos, content, commands);
+            processBanScript(vpos, content, commands);
+            processReplaceScript(vpos, content, commands, mc);
           }
 
           const nicoscriptInvisible = isOwner && isNicoscript(content);
 
           if (isOwner) {
-            processDefaultScript(vposSec, content, commands, mc);
+            processDefaultScript(vpos, content, commands, mc);
           }
 
           const item = {
-            t: vposSec,
+            t: vpos,
             m: mc.mode,
             c: mc.color,
             text: content,
@@ -916,7 +916,7 @@ iina.onMessage("load-danmaku", (data) => {
             fillColor: mc.fillColor,
             dmOpacity: mc.opacity
           };
-          applyReplaceScripts(vposSec, item);
+          applyReplaceScripts(vpos, item);
           list.push(item);
         }
       }
@@ -946,27 +946,26 @@ function parseXmlDanmaku(xmlStr) {
       if (!text) continue;
 
       const vpos = parseInt(el.getAttribute('vpos') || "0", 10);
-      const vposSec = vpos / 100;
       const mail = el.getAttribute('mail') || "";
       const commands = mail.toLowerCase().split(/\s+/);
       const isOwner = !el.getAttribute('user_id');
       const mc = parseMailCommands(commands);
 
       if (isOwner) {
-        processReverseScript(vposSec, text, commands);
-        processSpeedScript(vposSec, text, commands);
-        processBanScript(vposSec, text, commands);
-        processReplaceScript(vposSec, text, commands, mc);
+        processReverseScript(vpos, text, commands);
+        processSpeedScript(vpos, text, commands);
+        processBanScript(vpos, text, commands);
+        processReplaceScript(vpos, text, commands, mc);
       }
 
       const nicoscriptInvisible = isOwner && isNicoscript(text);
 
       if (isOwner) {
-        processDefaultScript(vposSec, text, commands, mc);
+        processDefaultScript(vpos, text, commands, mc);
       }
 
       const item = {
-        t: vposSec,
+        t: vpos,
         m: mc.mode,
         c: mc.color,
         text: text,
@@ -982,7 +981,7 @@ function parseXmlDanmaku(xmlStr) {
         fillColor: mc.fillColor,
         dmOpacity: mc.opacity
       };
-      applyReplaceScripts(vposSec, item);
+      applyReplaceScripts(vpos, item);
       list.push(item);
     }
   } else {
@@ -993,13 +992,13 @@ function parseXmlDanmaku(xmlStr) {
       let colorVal = parseInt(p[3]);
       if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
       let danmakuSize = parseInt(p[2]) || 25;
-      const vposSec = parseFloat(p[0]);
+      const vpos = Math.round(parseFloat(p[0]) * 100);
       const text = match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<\/d/, '');
       const commands = p[5] ? p[5].toLowerCase().split(/\s+/) : [];
-      processSpeedScript(vposSec, text, commands);
+      processSpeedScript(vpos, text, commands);
       const mc = parseMailCommands(commands);
       const item = {
-        t: vposSec,
+        t: vpos,
         m: parseInt(p[1]),
         c: "#" + colorVal.toString(16).padStart(6, '0'),
         text: text,
@@ -1015,7 +1014,7 @@ function parseXmlDanmaku(xmlStr) {
         fillColor: mc.fillColor,
         dmOpacity: mc.opacity
       };
-      applyReplaceScripts(vposSec, item);
+      applyReplaceScripts(vpos, item);
       list.push(item);
     }
   }

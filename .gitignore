@@ -130,4 +130,6 @@ index.d.ts
 .dist/
 test-speed.xml
 test-speed.json
+test-all.xml
+test-all.json
 NICOSCRIPT_DOC.md

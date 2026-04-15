@@ -60,7 +60,7 @@ html, body {
   z-index: 20;
   left: 50%;
   transform: translateX(-50%);
-  white-space: pre-line;
+  white-space: pre;
   text-align: center;
   animation: fixed-anim var(--dur) linear forwards;
   animation-delay: var(--delay, 0ms);
@@ -71,7 +71,7 @@ html, body {
   z-index: 30;
   left: 50%;
   transform: translateX(-50%);
-  white-space: pre-line;
+  white-space: pre;
   text-align: center;
   animation: fixed-anim var(--dur) linear forwards;
   animation-delay: var(--delay, 0ms);
