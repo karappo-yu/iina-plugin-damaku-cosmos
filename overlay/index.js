@@ -458,7 +458,6 @@ function handleSeek(timeSec) {
   
   resetLaneData();
   updateLanes();
-  lastReverseState = false; 
   
   const durSec = Math.max(scrollDuration, fixedDuration) / 1000;
   currentIndex = allDanmaku.findIndex(d => d.t >= timeSec - durSec);
@@ -474,6 +473,8 @@ function handleSeek(timeSec) {
     tempIndex++;
   }
   currentIndex = tempIndex;
+  
+  lastReverseState = isReverseActive(timeSec, false);
 }
 
 iina.onMessage("time-update", (data) => {
