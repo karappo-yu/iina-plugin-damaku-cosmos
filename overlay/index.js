@@ -17,8 +17,10 @@ function reverseAllActiveDanmaku(newReverseState) {
     const el = item.el;
     const d = item.d;
     const durMs = (d.m >= 1 && d.m <= 3) ? scrollDuration : fixedDuration;
+    const currentSpeedMult = getSpeedMultiplier(lastTime, d._isOwner);
+    const adjustedDurMs = durMs / currentSpeedMult;
     const elapsedMs = (lastTime - d.t) * 1000;
-    const remainingMs = durMs - elapsedMs;
+    const remainingMs = adjustedDurMs - elapsedMs;
     
     const rect = el.getBoundingClientRect();
     const currentX = rect.left;
@@ -72,10 +74,13 @@ const OFFSET_STEP = 0.25;           // 可微调：0.22~0.28 之间最舒服
 
 // --- 倒放脚本状态 ---
 const nicoScripts = {
-  reverse: []
+  reverse: [],
+  speed: []  // { start, end, multiplier }
 };
 let reverseActiveOwnerCache = new Map();
 let reverseActiveViewerCache = new Map();
+let speedActiveOwnerCache = new Map();
+let speedActiveViewerCache = new Map();
 
 // --- 倒放脚本解析 ---
 const RE_REVERSE = /^@\u9006(?:\s+)?(\u5168|\u30b3\u30e1|\u6295\u30b3\u30e1)?/;
@@ -125,6 +130,52 @@ function isReverseActive(vposSec, isOwner) {
   
   cache.set(vposSec, result);
   return result;
+}
+
+// --- 速度脚本解析 ---
+const RE_SPEED_UP = /^@\u901f\u3044/;      // @速い
+const RE_SPEED_DOWN = /^@\u9045\u3044/;    // @遅い
+
+function processSpeedScript(vposSec, content, commands) {
+  const speedUpMatch = RE_SPEED_UP.exec(content);
+  const speedDownMatch = RE_SPEED_DOWN.exec(content);
+  if (!speedUpMatch && !speedDownMatch) return;
+  
+  const isSpeedUp = !!speedUpMatch;
+  let durationSec = 30;
+  
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationSec = parseInt(durationMatch[1], 10);
+      break;
+    }
+  }
+  
+  nicoScripts.speed.unshift({
+    start: vposSec,
+    end: vposSec + durationSec,
+    multiplier: isSpeedUp ? 2 : 0.5
+  });
+  speedActiveOwnerCache.clear();
+  speedActiveViewerCache.clear();
+}
+
+function getSpeedMultiplier(vposSec, isOwner) {
+  const cache = isOwner ? speedActiveOwnerCache : speedActiveViewerCache;
+  const cached = cache.get(vposSec);
+  if (cached !== undefined) return cached;
+  
+  let multiplier = 1;
+  for (const range of nicoScripts.speed) {
+    if (range.start <= vposSec && vposSec <= range.end) {
+      multiplier = range.multiplier;
+      break;
+    }
+  }
+  
+  cache.set(vposSec, multiplier);
+  return multiplier;
 }
 
 // --- 动态轨道控制（现在是 2D 数组 [lane][level]）---
@@ -318,10 +369,12 @@ function createDanmaku(d, currentTime = null) {
   if (isBottom && window._blockBottom) return;
 
   const durMs = isScroll ? scrollDuration : fixedDuration;
+  const speedMult = getSpeedMultiplier(d.t, d._isOwner);
+  const adjustedDurMs = durMs / speedMult;
   const videoTimeMs = d.t * 1000;
   const elapsedMs = currentTime !== null ? (currentTime - d.t) * 1000 : 0;
   
-  if (elapsedMs >= durMs || elapsedMs < 0) return;
+  if (elapsedMs >= adjustedDurMs || elapsedMs < 0) return;
 
   const el = document.createElement('div');
   el.className = 'dm-item';
@@ -341,7 +394,7 @@ function createDanmaku(d, currentTime = null) {
   container.appendChild(el);
 
   if (isBottom || isTop) {
-    setTimeout(() => el.classList.add('priority-low'), durMs / 2);
+    setTimeout(() => el.classList.add('priority-low'), adjustedDurMs / 2);
   }
 
   if (d._textW === undefined) {
@@ -365,11 +418,11 @@ function createDanmaku(d, currentTime = null) {
   } else {
     let result = null;
     if (isScroll) {
-      result = getFreeScrollLane(scrollLanes, textW, winW, durMs, videoTimeMs, lanesNeeded);
+      result = getFreeScrollLane(scrollLanes, textW, winW, adjustedDurMs, videoTimeMs, lanesNeeded);
     } else if (isTop) {
-      result = getFreeFixedLane(topLanes, durMs, videoTimeMs, lanesNeeded);
+      result = getFreeFixedLane(topLanes, adjustedDurMs, videoTimeMs, lanesNeeded);
     } else if (isBottom) {
-      result = getFreeFixedLane(bottomLanes, durMs, videoTimeMs, lanesNeeded);
+      result = getFreeFixedLane(bottomLanes, adjustedDurMs, videoTimeMs, lanesNeeded);
     }
 
     if (!result) {
@@ -420,7 +473,7 @@ function createDanmaku(d, currentTime = null) {
     el.style.bottom = `${visualBottom * laneHeightVh + 1}vh`;
   }
 
-  el.style.setProperty('--dur', `${durMs}ms`);
+  el.style.setProperty('--dur', `${adjustedDurMs}ms`);
   el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
   const isReverse = isReverseActive(videoTimeMs / 1000, d._isOwner);
@@ -507,8 +560,11 @@ iina.onMessage("load-danmaku", (data) => {
   updateLanes();
   
   nicoScripts.reverse = [];
+  nicoScripts.speed = [];
   reverseActiveOwnerCache.clear();
   reverseActiveViewerCache.clear();
+  speedActiveOwnerCache.clear();
+  speedActiveViewerCache.clear();
   lastReverseState = false;
   
   let list = [];
@@ -529,6 +585,7 @@ iina.onMessage("load-danmaku", (data) => {
           
           if (isOwner) {
             processReverseScript(vposSec, content, commands);
+            processSpeedScript(vposSec, content, commands);
           }
           
           let mode = 1;
@@ -588,14 +645,17 @@ function parseXmlDanmaku(xmlStr) {
       if (!text) continue;
 
       const vpos = parseInt(el.getAttribute('vpos') || "0", 10);
+      const vposSec = vpos / 100;
       const mail = el.getAttribute('mail') || "";
       const commands = mail.toLowerCase().split(/\s+/);
 
-      let mode = 1; 
+      processSpeedScript(vposSec, text, commands);
+
+      let mode = 1;
       if (commands.includes('shita')) mode = 4;
       else if (commands.includes('ue')) mode = 5;
 
-      let size = 25; 
+      let size = 25;
       if (commands.includes('big')) size = 36;
       else if (commands.includes('small')) size = 15;
 
@@ -612,11 +672,12 @@ function parseXmlDanmaku(xmlStr) {
       }
 
       list.push({
-        t: vpos / 100,
+        t: vposSec,
         m: mode,
         c: color,
         text: text,
-        size: size
+        size: size,
+        _isOwner: true
       });
     }
   } else {
@@ -627,12 +688,17 @@ function parseXmlDanmaku(xmlStr) {
       let colorVal = parseInt(p[3]);
       if (colorVal < 0) colorVal = (colorVal >>> 0) & 0xFFFFFF;
       let danmakuSize = parseInt(p[2]) || 25;
+      const vposSec = parseFloat(p[0]);
+      const text = match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<\/d/, '');
+      const commands = p[5] ? p[5].toLowerCase().split(/\s+/) : [];
+      processSpeedScript(vposSec, text, commands);
       list.push({
-        t: parseFloat(p[0]),
+        t: vposSec,
         m: parseInt(p[1]),
         c: "#" + colorVal.toString(16).padStart(6, '0'),
-        text: match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<\/d/, ''),
-        size: danmakuSize
+        text: text,
+        size: danmakuSize,
+        _isOwner: true
       });
     }
   }
