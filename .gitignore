@@ -128,3 +128,5 @@ package-lock.json
 .trae/
 index.d.ts
 .dist/
+test-speed.xml
+test-speed.json
