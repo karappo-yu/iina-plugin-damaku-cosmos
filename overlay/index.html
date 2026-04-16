@@ -8,6 +8,16 @@
 </head>
 <body>
   <div id="danmaku-container"></div>
-  <script src="index.js"></script>
+
+  <!-- 模块加载顺序（依赖链：config → command → flash → nicoscript → lane → renderer → input → ca-score → main） -->
+  <script src="config.js"></script>
+  <script src="command.js"></script>
+  <script src="flash.js"></script>
+  <script src="nicoscript.js"></script>
+  <script src="lane.js"></script>
+  <script src="renderer.js"></script>
+  <script src="input.js"></script>
+  <script src="ca-score.js"></script>
+  <script src="main.js"></script>
 </body>
 </html>

@@ -147,7 +147,7 @@ html, body {
 
 /* Flash 弹幕标记 */
 .dm-item.dm-flash {
-  /* Flash 模式下的特殊处理 */
+  font-family: "MS PGothic", "ＭＳ Ｐゴシック", "Hiragino Sans", "Noto Sans JP", Gulim, SimSun, sans-serif;
 }
 
 /* 日文汉字字体（Gothic） */
