@@ -73,6 +73,13 @@ const NICO_LINE_HEIGHT = {
 
 const FLASH_THRESHOLD = 1499871600;
 
+const FLASH_SCRIPT_CHAR = {
+  super: /[\u00aa\u00b2\u00b3\u00b9\u00ba\u02b0\u02b2\u02b3\u02b7\u02b8\u02e1-\u02e3\u0304\u1d2c-\u1d43\u1d45-\u1d61\u1d9b-\u1da1\u1da3-\u1dbf\u2070\u2071\u2074-\u207f\u2c7d]/g,
+  sub: /[\u0320\u1d62-\u1d6a\u2080-\u208e\u2090-\u209c\u2c7c]/g
+};
+
+const FLASH_SCRIPT_CHAR_OFFSET = 0.12;
+
 function getSizeKey(size) {
   if (size >= 36) return 'big';
   if (size <= 15) return 'small';
@@ -98,6 +105,71 @@ function preprocessFlashText(text) {
   result = result.replace(/\t/g, '\u3000\u3000');
   result = result.replace(/\u2000/g, '\u3000');
   return result;
+}
+
+function preprocessFlashTextWithRuby(text) {
+  let result = text;
+  result = result.replace(/\t/g, '\u3000\u3000');
+  result = result.replace(/\u2000/g, '\u3000');
+
+  const parts = [];
+  let lastIndex = 0;
+  let superCount = 0;
+  let subCount = 0;
+
+  const combinedRegex = /[\u00aa\u00b2\u00b3\u00b9\u00ba\u02b0\u02b2\u02b3\u02b7\u02b8\u02e1-\u02e3\u0304\u1d2c-\u1d43\u1d45-\u1d61\u1d9b-\u1da1\u1da3-\u1dbf\u2070\u2071\u2074-\u207f\u2c7d\u0320\u1d62-\u1d6a\u2080-\u208e\u2090-\u209c\u2c7c]/g;
+
+  let match;
+  while ((match = combinedRegex.exec(result)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', content: result.slice(lastIndex, match.index) });
+    }
+
+    const char = match[0];
+    const code = char.codePointAt(0);
+
+    const isSuper = FLASH_SCRIPT_CHAR.super.test(char);
+    const isSub = FLASH_SCRIPT_CHAR.sub.test(char);
+
+    if (isSuper || isSub) {
+      parts.push({ type: isSuper ? 'super' : 'sub', content: char });
+      if (isSuper) superCount++;
+      if (isSub) subCount++;
+    } else {
+      parts.push({ type: 'text', content: char });
+    }
+
+    lastIndex = match.index + char.length;
+  }
+
+  if (lastIndex < result.length) {
+    parts.push({ type: 'text', content: result.slice(lastIndex) });
+  }
+
+  if (superCount === 0 && subCount === 0) {
+    return { hasRuby: false, html: result };
+  }
+
+  let html = '';
+  for (const part of parts) {
+    if (part.type === 'super') {
+      html += `<span class="dm-ruby-super">${escapeHtml(part.content)}</span>`;
+    } else if (part.type === 'sub') {
+      html += `<span class="dm-ruby-sub">${escapeHtml(part.content)}</span>`;
+    } else {
+      html += escapeHtml(part.content);
+    }
+  }
+
+  return { hasRuby: true, html };
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 const NICO_COLORS = {
@@ -775,17 +847,25 @@ function createDanmaku(d, currentTime = null) {
   el.className = 'dm-item';
   
   let posX = null, posY = null;
-  if (isPositioned) {
-    const parsed = parsePositionedContent(d.text);
+  let displayText = d.text;
+  if (d._isFlash) {
+    const processed = preprocessFlashTextWithRuby(displayText);
+    if (processed.hasRuby) {
+      el.innerHTML = processed.html;
+    } else {
+      el.textContent = preprocessFlashText(displayText);
+    }
+  } else if (isPositioned) {
+    const parsed = parsePositionedContent(displayText);
     if (parsed) {
       posX = parsed.posX;
       posY = parsed.posY;
       el.textContent = parsed.text;
     } else {
-      el.textContent = d.text;
+      el.textContent = displayText;
     }
   } else {
-    el.textContent = d.text;
+    el.textContent = displayText;
   }
   
   el.style.color = effectiveColor;
@@ -795,7 +875,7 @@ function createDanmaku(d, currentTime = null) {
   const lineCount = (d.text.match(/\n/g) || []).length + 1;
   const isMultiLine = lineCount > 1;
   let danmakuFs;
-  if (isMultiLine) {
+  if (isMultiLine && !(isTop || isBottom)) {
     danmakuFs = (100 / (lineCount * NICO_LINE_HEIGHT[sizeKey]) * fontScale).toFixed(4) + 'vh';
   } else {
     danmakuFs = (resolvedFs / 27 * (100 / 15) * fontScale).toFixed(4) + 'vh';
@@ -839,6 +919,10 @@ function createDanmaku(d, currentTime = null) {
 
   if (d.ender) {
     el.classList.add('dm-ender');
+  }
+
+  if (d._isFlash) {
+    el.classList.add('dm-flash');
   }
 
   if (isScroll || isReverseScroll) el.classList.add('dm-scroll');
@@ -889,13 +973,17 @@ function createDanmaku(d, currentTime = null) {
   if (isMultiLine) {
     el.style.left = '50%';
     el.style.transform = 'translateX(-50%)';
-    el.style.top = '0';
+    if (isBottom) {
+      el.style.bottom = '0';
+    } else {
+      el.style.top = '0';
+    }
     el.style.setProperty('--dur', `${adjustedDurMs}ms`);
     el.style.setProperty('--delay', `-${elapsedMs}ms`);
-    
+
     const item = { el, d, type: 'fixed' };
     activeDanmaku.add(item);
-    
+
     el.addEventListener('animationend', () => {
       el.remove();
       activeDanmaku.delete(item);

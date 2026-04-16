@@ -57,6 +57,7 @@ html, body {
 
 /* Z-Index 20: 底部说明 */
 .dm-bottom {
+  position: absolute;
   z-index: 20;
   left: 50%;
   transform: translateX(-50%);
@@ -68,6 +69,7 @@ html, body {
 
 /* Z-Index 30: 顶部字幕，最顶层不可遮挡 */
 .dm-top {
+  position: absolute;
   z-index: 30;
   left: 50%;
   transform: translateX(-50%);
@@ -79,6 +81,7 @@ html, body {
 
 /* Z-Index 25: 定位弹幕 */
 .dm-positioned {
+  position: absolute;
   z-index: 25;
   white-space: pre;
   text-align: center;
@@ -126,4 +129,23 @@ html, body {
   0%    { opacity: 1; }
   99.9% { opacity: 1; }
   100%  { opacity: 0; visibility: hidden; }
+}
+
+/* Flash 上标文字（垂直偏移向上） */
+.dm-item.dm-flash .dm-ruby-super {
+  display: inline-block;
+  transform: translateY(-0.12em);
+  font-size: 0.8em;
+}
+
+/* Flash 下标文字（垂直偏移向下） */
+.dm-item.dm-flash .dm-ruby-sub {
+  display: inline-block;
+  transform: translateY(0.12em);
+  font-size: 0.8em;
+}
+
+/* Flash 弹幕标记 */
+.dm-item.dm-flash {
+  /* Flash 模式下的特殊处理 */
 }
