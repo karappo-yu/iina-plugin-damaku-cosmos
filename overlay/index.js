@@ -7,6 +7,7 @@ let currentIndex = 0;
 let lastTime = 0;
 let isPaused = false;
 let lastReverseState = false;
+let lastSeekDisabled = false;
 
 function reverseAllActiveDanmaku(newReverseState) {
   if (activeDanmaku.size === 0) return;
@@ -16,7 +17,8 @@ function reverseAllActiveDanmaku(newReverseState) {
   activeDanmaku.forEach(item => {
     const el = item.el;
     const d = item.d;
-    const durMs = (d.m >= 1 && d.m <= 3) ? scrollDuration : fixedDuration;
+    if (item.type !== 'scroll') return;
+    const durMs = scrollDuration;
     const currentSpeedMult = getSpeedMultiplier(lastTime, d._isOwner);
     const adjustedDurMs = durMs / currentSpeedMult;
     const elapsedMs = (lastTime - d.t) * 10;
@@ -58,6 +60,46 @@ let maxLaneRatio = 1.0;
 const _refHeight = 1080;
 
 // --- Nico 专属颜色映射表 ---
+const NICO_FONT_SIZE = {
+  html5: { small: 18, medium: 27, big: 39 },
+  flash: { small: 15, medium: 24, big: 39 }
+};
+
+const NICO_LINE_HEIGHT = {
+  small: 1.2,
+  medium: 1.16,
+  big: 45 / 39
+};
+
+const FLASH_THRESHOLD = 1499871600;
+
+function getSizeKey(size) {
+  if (size >= 36) return 'big';
+  if (size <= 15) return 'small';
+  return 'medium';
+}
+
+function isFlashDanmaku(dateSec, commands) {
+  if (dateSec > 0 && dateSec < FLASH_THRESHOLD) return true;
+  for (const cmd of commands) {
+    if (cmd.toLowerCase() === 'nico:flash') return true;
+  }
+  return false;
+}
+
+function resolveFontSize(size, isFlash) {
+  const sizeKey = getSizeKey(size);
+  const mode = isFlash ? 'flash' : 'html5';
+  return NICO_FONT_SIZE[mode][sizeKey];
+}
+
+function preprocessFlashText(text) {
+  let result = text;
+  result = result.replace(/\t/g, '\u3000\u3000');
+  result = result.replace(/\u2000/g, '\u3000');
+  return result;
+}
+
 const NICO_COLORS = {
   red: '#FF0000', pink: '#FF8080', orange: '#FFC000', yellow: '#FFFF00',
   green: '#00FF00', cyan: '#00FFFF', blue: '#0000FF', purple: '#C000FF',
@@ -87,6 +129,18 @@ const RE_NICOSCRIPT = /^[@\uff20]\S+/;
 
 function isNicoscript(content) {
   return RE_NICOSCRIPT.test(content);
+}
+
+const RE_POSITION = /^([\d.]+)x([\d.]+)/;
+
+function parsePositionedContent(text) {
+  const match = RE_POSITION.exec(text);
+  if (!match) return null;
+  const posX = parseFloat(match[1]);
+  const posY = parseFloat(match[2]);
+  if (isNaN(posX) || isNaN(posY) || posX < 0 || posX > 1 || posY < 0 || posY > 1) return null;
+  const rest = text.slice(match[0].length).replace(/^\s+/, '');
+  return { posX, posY, text: rest || '' };
 }
 
 function parseMailCommands(commands) {
@@ -160,7 +214,9 @@ const nicoScripts = {
   speed: [],
   default: [],
   ban: [],
-  replace: []
+  replace: [],
+  seekDisable: [],
+  jump: []
 };
 let reverseActiveOwnerCache = new Map();
 let reverseActiveViewerCache = new Map();
@@ -332,6 +388,80 @@ function isBanActive(vpos) {
   return false;
 }
 
+const RE_SEEK_DISABLE = /^[@\uff20]\u30b7\u30fc\u30af\u7981\u6b62/;
+
+function processSeekDisableScript(vpos, content, commands) {
+  if (!RE_SEEK_DISABLE.test(content)) return;
+
+  let durationVpos = 3000;
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
+      break;
+    }
+  }
+
+  nicoScripts.seekDisable.unshift({
+    start: vpos,
+    end: vpos + durationVpos
+  });
+}
+
+function isSeekDisabled(vpos) {
+  for (const range of nicoScripts.seekDisable) {
+    if (range.start < vpos && vpos < range.end) return true;
+  }
+  return false;
+}
+
+const RE_JUMP = /^[@\uff20]\u30b8\u30e3\u30f3\u30d7(?:\s+(.+))?/;
+
+function processJumpScript(vpos, content, commands) {
+  const jumpMatch = RE_JUMP.exec(content);
+  if (!jumpMatch) return;
+
+  const param = jumpMatch[1];
+  if (!param) return;
+
+  let durationVpos = undefined;
+  for (const cmd of commands) {
+    const durationMatch = /^@(\d+)$/.exec(cmd);
+    if (durationMatch) {
+      durationVpos = parseInt(durationMatch[1], 10) * 100;
+      break;
+    }
+  }
+
+  const timeMatch = /#([0-9]+):([0-9]+)(?:\.([0-9]+))?/.exec(param);
+  if (timeMatch) {
+    const min = parseInt(timeMatch[1], 10);
+    const sec = parseInt(timeMatch[2], 10);
+    const ms = timeMatch[3] ? parseInt(timeMatch[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+    const targetVpos = Math.round((min * 60 + sec) * 100 + ms / 10);
+    const messageMatch = /\s+(.+)$/.exec(param.slice(timeMatch[0].length));
+    nicoScripts.jump.unshift({
+      start: vpos,
+      end: durationVpos !== undefined ? vpos + durationVpos : undefined,
+      to: `#${timeMatch[1]}:${timeMatch[2]}`,
+      targetVpos: targetVpos,
+      message: messageMatch ? messageMatch[1].trim() : ''
+    });
+    return;
+  }
+
+  const videoMatch = /((?:sm|so|nm)\d+)\s*(.*)/.exec(param);
+  if (videoMatch) {
+    nicoScripts.jump.unshift({
+      start: vpos,
+      end: durationVpos !== undefined ? vpos + durationVpos : undefined,
+      to: videoMatch[1],
+      targetVpos: null,
+      message: videoMatch[2] || ''
+    });
+  }
+}
+
 const RE_REPLACE = /^[@\uff20]\u7f6e\u63db/;
 
 function splitQuotedString(str) {
@@ -460,7 +590,7 @@ function clearDanmakuCaches() {
 }
 
 function updateLanes() {
-  const laneHeightVh = (100 / 15) * 1.1 * fontScale;
+  const laneHeightVh = (27 / 27) * (100 / 15) * NICO_LINE_HEIGHT.medium * fontScale;
   const newMaxLanes = Math.max(1, Math.floor(100 / laneHeightVh));
 
   if (newMaxLanes !== maxLanes) {
@@ -627,6 +757,7 @@ function createDanmaku(d, currentTime = null) {
   const isReverseScroll = effectiveMode === 6;
   const isBottom = effectiveMode === 4;
   const isTop = effectiveMode === 5;
+  const isPositioned = effectiveMode === 7;
   
   if ((isScroll || isReverseScroll) && window._blockScroll) return;
   if (isTop && window._blockTop) return;
@@ -642,11 +773,35 @@ function createDanmaku(d, currentTime = null) {
 
   const el = document.createElement('div');
   el.className = 'dm-item';
-  el.textContent = d.text;
+  
+  let posX = null, posY = null;
+  if (isPositioned) {
+    const parsed = parsePositionedContent(d.text);
+    if (parsed) {
+      posX = parsed.posX;
+      posY = parsed.posY;
+      el.textContent = parsed.text;
+    } else {
+      el.textContent = d.text;
+    }
+  } else {
+    el.textContent = d.text;
+  }
+  
   el.style.color = effectiveColor;
   el.dataset.size = effectiveSize;
-  const danmakuFs = ((effectiveSize / 25) * (100 / 15) * fontScale).toFixed(4) + 'vh';
+  const sizeKey = getSizeKey(effectiveSize);
+  const resolvedFs = resolveFontSize(effectiveSize, d._isFlash);
+  const lineCount = (d.text.match(/\n/g) || []).length + 1;
+  const isMultiLine = lineCount > 1;
+  let danmakuFs;
+  if (isMultiLine) {
+    danmakuFs = (100 / (lineCount * NICO_LINE_HEIGHT[sizeKey]) * fontScale).toFixed(4) + 'vh';
+  } else {
+    danmakuFs = (resolvedFs / 27 * (100 / 15) * fontScale).toFixed(4) + 'vh';
+  }
   el.style.fontSize = danmakuFs;
+  el.style.lineHeight = NICO_LINE_HEIGHT[sizeKey];
 
   if (effectiveFont && NICO_FONTS[effectiveFont]) {
     el.style.fontFamily = NICO_FONTS[effectiveFont];
@@ -689,11 +844,63 @@ function createDanmaku(d, currentTime = null) {
   if (isScroll || isReverseScroll) el.classList.add('dm-scroll');
   else if (isBottom) el.classList.add('dm-bottom');
   else if (isTop) el.classList.add('dm-top');
+  else if (isPositioned) el.classList.add('dm-positioned');
 
   container.appendChild(el);
 
   if ((isBottom || isTop) && !d.ender) {
     setTimeout(() => el.classList.add('priority-low'), adjustedDurMs / 2);
+  }
+
+  if (isPositioned) {
+    if (d._textW === undefined) {
+      d._textW = el.offsetWidth;
+    }
+    const textW = d._textW;
+    const winW = window.innerWidth;
+    const maxW = d.full ? winW : winW * 0.95;
+    if (textW > maxW) {
+      el.style.transform = `translateX(-50%) scaleX(${maxW / textW})`;
+    } else {
+      el.style.transform = `translateX(-50%)`;
+    }
+    
+    el.style.setProperty('--dur', `${adjustedDurMs}ms`);
+    el.style.setProperty('--delay', `-${elapsedMs}ms`);
+    
+    if (posX !== null && posY !== null) {
+      el.style.left = `${posX * 100}%`;
+      el.style.top = `${posY * 100}%`;
+    } else {
+      el.style.left = '50%';
+      el.style.top = '50%';
+    }
+    
+    const item = { el, d, type: 'fixed' };
+    activeDanmaku.add(item);
+    
+    el.addEventListener('animationend', () => {
+      el.remove();
+      activeDanmaku.delete(item);
+    });
+    return;
+  }
+
+  if (isMultiLine) {
+    el.style.left = '50%';
+    el.style.transform = 'translateX(-50%)';
+    el.style.top = '0';
+    el.style.setProperty('--dur', `${adjustedDurMs}ms`);
+    el.style.setProperty('--delay', `-${elapsedMs}ms`);
+    
+    const item = { el, d, type: 'fixed' };
+    activeDanmaku.add(item);
+    
+    el.addEventListener('animationend', () => {
+      el.remove();
+      activeDanmaku.delete(item);
+    });
+    return;
   }
 
   if (d._textW === undefined) {
@@ -772,6 +979,15 @@ function createDanmaku(d, currentTime = null) {
     el.style.bottom = `${visualBottom * laneHeightVh + 1}vh`;
   }
 
+  if ((isTop || isBottom) && d._textW !== undefined) {
+    const maxW = window.innerWidth * 0.95;
+    if (d._textW > maxW) {
+      el.style.transform = `translateX(-50%) scaleX(${maxW / d._textW})`;
+    } else {
+      el.style.transform = `translateX(-50%)`;
+    }
+  }
+
   el.style.setProperty('--dur', `${adjustedDurMs}ms`);
   el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
@@ -820,7 +1036,7 @@ function handleSeek(timeVpos) {
     const d = allDanmaku[tempIndex];
     const typeDur = (d.m >= 1 && d.m <= 6) ? scrollDuration : fixedDuration;
     if (timeVpos - d.t < typeDur / 10) {
-      createDanmaku(d, timeVpos); 
+      createDanmaku(d, timeVpos);
     }
     tempIndex++;
   }
@@ -845,6 +1061,24 @@ iina.onMessage("time-update", (data) => {
     reverseAllActiveDanmaku(currentReverseState);
     lastReverseState = currentReverseState;
   }
+
+  const currentSeekDisabled = isSeekDisabled(t);
+  if (currentSeekDisabled !== lastSeekDisabled) {
+    iina.postMessage(currentSeekDisabled ? "seek-disable" : "seek-enable", {});
+    lastSeekDisabled = currentSeekDisabled;
+  }
+
+  for (const jump of nicoScripts.jump) {
+    if (jump.start <= t && t - jump.start < 20) {
+      if (jump._fired) continue;
+      jump._fired = true;
+      if (jump.targetVpos !== null) {
+        iina.postMessage("jump", { targetSec: jump.targetVpos / 100, message: jump.message, to: jump.to });
+      } else {
+        iina.postMessage("jump-video", { videoId: jump.to, message: jump.message });
+      }
+    }
+  }
   
   lastTime = t;
 });
@@ -863,6 +1097,8 @@ iina.onMessage("load-danmaku", (data) => {
   nicoScripts.default = [];
   nicoScripts.ban = [];
   nicoScripts.replace = [];
+  nicoScripts.seekDisable = [];
+  nicoScripts.jump = [];
   reverseActiveOwnerCache.clear();
   reverseActiveViewerCache.clear();
   speedActiveOwnerCache.clear();
@@ -885,11 +1121,15 @@ iina.onMessage("load-danmaku", (data) => {
           const commands = comment.commands || [];
           const content = comment.body;
           const mc = parseMailCommands(commands);
+          const isFlash = isFlashDanmaku(0, commands);
+          const displayText = isFlash ? preprocessFlashText(content) : content;
           
           if (isOwner) {
             processReverseScript(vpos, content, commands);
             processSpeedScript(vpos, content, commands);
             processBanScript(vpos, content, commands);
+            processSeekDisableScript(vpos, content, commands);
+            processJumpScript(vpos, content, commands);
             processReplaceScript(vpos, content, commands, mc);
           }
 
@@ -903,9 +1143,10 @@ iina.onMessage("load-danmaku", (data) => {
             t: vpos,
             m: mc.mode,
             c: mc.color,
-            text: content,
+            text: displayText,
             size: mc.size,
             _isOwner: isOwner,
+            _isFlash: isFlash,
             font: mc.font,
             invisible: mc.invisible || nicoscriptInvisible,
             live: mc.live,
@@ -949,12 +1190,17 @@ function parseXmlDanmaku(xmlStr) {
       const mail = el.getAttribute('mail') || "";
       const commands = mail.toLowerCase().split(/\s+/);
       const isOwner = !el.getAttribute('user_id');
+      const dateSec = parseInt(el.getAttribute('date') || "0", 10);
       const mc = parseMailCommands(commands);
+      const isFlash = isFlashDanmaku(dateSec, commands);
+      const displayText = isFlash ? preprocessFlashText(text) : text;
 
       if (isOwner) {
         processReverseScript(vpos, text, commands);
         processSpeedScript(vpos, text, commands);
         processBanScript(vpos, text, commands);
+        processSeekDisableScript(vpos, text, commands);
+        processJumpScript(vpos, text, commands);
         processReplaceScript(vpos, text, commands, mc);
       }
 
@@ -968,9 +1214,10 @@ function parseXmlDanmaku(xmlStr) {
         t: vpos,
         m: mc.mode,
         c: mc.color,
-        text: text,
+        text: displayText,
         size: mc.size,
         _isOwner: isOwner,
+        _isFlash: isFlash,
         font: mc.font,
         invisible: mc.invisible || nicoscriptInvisible,
         live: mc.live,
@@ -1004,6 +1251,7 @@ function parseXmlDanmaku(xmlStr) {
         text: text,
         size: danmakuSize,
         _isOwner: true,
+        _isFlash: false,
         font: mc.font,
         invisible: mc.invisible,
         live: mc.live,

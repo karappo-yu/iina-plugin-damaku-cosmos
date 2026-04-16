@@ -310,6 +310,29 @@ overlay.onMessage("danmaku-error", function (data) {
   console.warn("Danmaku error: " + (data.message || "unknown"));
 });
 
+overlay.onMessage("seek-disable", function () {
+  core.osd("弹幕：禁止跳转");
+});
+
+overlay.onMessage("seek-enable", function () {
+  core.osd("弹幕：允许跳转");
+});
+
+overlay.onMessage("jump", function (data) {
+  if (data.targetSec !== undefined && data.targetSec !== null) {
+    mpv.set("time-pos", data.targetSec);
+    if (data.message) {
+      core.osd("弹幕跳转: " + data.message);
+    }
+  }
+});
+
+overlay.onMessage("jump-video", function (data) {
+  if (data.videoId) {
+    core.osd("弹幕跳转: " + data.videoId + (data.message ? " " + data.message : ""));
+  }
+});
+
 menu.addItem(
   menu.item("切换弹幕显示", function () {
     danmakuEnabled = !danmakuEnabled;
