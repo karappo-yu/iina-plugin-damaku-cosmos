@@ -884,6 +884,7 @@ function createDanmaku(d, currentTime = null) {
   el.style.lineHeight = NICO_LINE_HEIGHT[sizeKey];
 
   if (effectiveFont && NICO_FONTS[effectiveFont]) {
+    el.classList.add(`dm-${effectiveFont}`);
     el.style.fontFamily = NICO_FONTS[effectiveFont];
     if (effectiveFont === 'mincho' || effectiveFont === 'simsun') {
       el.style.fontWeight = '400';

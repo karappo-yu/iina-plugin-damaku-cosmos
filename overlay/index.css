@@ -149,3 +149,31 @@ html, body {
 .dm-item.dm-flash {
   /* Flash 模式下的特殊处理 */
 }
+
+/* 日文汉字字体（Gothic） */
+.dm-item.dm-gothic {
+  font-family: "游ゴシック体", "游ゴシック", "Yu Gothic", YuGothic, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-weight: 800;
+  -webkit-text-stroke: 0.16vw rgba(0,0,0,0.5);
+}
+
+/* 日文明朝体（Mincho） */
+.dm-item.dm-mincho {
+  font-family: "游明朝体", "游明朝", "Yu Mincho", YuMincho, "Hiragino Mincho ProN", serif;
+  font-weight: 800;
+  -webkit-text-stroke: 0.16vw rgba(0,0,0,0.5);
+}
+
+/* 韩文哥特字体（Gulim） */
+.dm-item.dm-gulim {
+  font-family: Gulim, "Hiragino Sans", sans-serif;
+  font-weight: 800;
+  -webkit-text-stroke: 0.16vw rgba(0,0,0,0.5);
+}
+
+/* 中文宋体（SimSun） */
+.dm-item.dm-simsun {
+  font-family: SimSun, "Hiragino Mincho ProN", "MS Mincho", "MS PMincho", serif;
+  font-weight: 800;
+  -webkit-text-stroke: 0.16vw rgba(0,0,0,0.5);
+}
