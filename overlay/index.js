@@ -226,6 +226,7 @@ function parseMailCommands(commands) {
   let live = false;
   let full = false;
   let ender = false;
+  let patissier = false;
   let strokeColor = null;
   let wakuColor = null;
   let fillColor = null;
@@ -251,6 +252,7 @@ function parseMailCommands(commands) {
     if (c === '_live') { live = true; continue; }
     if (c === 'full') { full = true; continue; }
     if (c === 'ender') { ender = true; continue; }
+    if (c === 'patissier') { patissier = true; continue; }
 
     if (c.startsWith('nico:stroke:') && !strokeColor) {
       strokeColor = resolveColor(raw.slice(12)); continue;
@@ -273,7 +275,7 @@ function parseMailCommands(commands) {
     }
   }
 
-  return { mode, size, color, font, invisible, live, full, ender, strokeColor, wakuColor, fillColor, opacity };
+  return { mode, size, color, font, invisible, live, full, ender, patissier, strokeColor, wakuColor, fillColor, opacity };
 }
 
 // --- 多层偏移常量 ---
@@ -875,7 +877,7 @@ function createDanmaku(d, currentTime = null) {
   const lineCount = (d.text.match(/\n/g) || []).length + 1;
   const isMultiLine = lineCount > 1;
   let danmakuFs;
-  if (isMultiLine && !(isTop || isBottom)) {
+  if (isMultiLine && d?.patissier) {
     danmakuFs = (100 / (lineCount * NICO_LINE_HEIGHT[sizeKey]) * fontScale).toFixed(4) + 'vh';
   } else {
     danmakuFs = (resolvedFs / 27 * (100 / 15) * fontScale).toFixed(4) + 'vh';
@@ -1241,6 +1243,7 @@ iina.onMessage("load-danmaku", (data) => {
             live: mc.live,
             full: mc.full,
             ender: mc.ender,
+            patissier: mc.patissier,
             strokeColor: mc.strokeColor,
             wakuColor: mc.wakuColor,
             fillColor: mc.fillColor,
@@ -1312,6 +1315,7 @@ function parseXmlDanmaku(xmlStr) {
         live: mc.live,
         full: mc.full,
         ender: mc.ender,
+        patissier: mc.patissier,
         strokeColor: mc.strokeColor,
         wakuColor: mc.wakuColor,
         fillColor: mc.fillColor,
@@ -1346,6 +1350,7 @@ function parseXmlDanmaku(xmlStr) {
         live: mc.live,
         full: mc.full,
         ender: mc.ender,
+        patissier: mc.patissier,
         strokeColor: mc.strokeColor,
         wakuColor: mc.wakuColor,
         fillColor: mc.fillColor,
