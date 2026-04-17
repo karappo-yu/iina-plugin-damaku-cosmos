@@ -4,7 +4,7 @@
 
 ![Danmaku Cosmos](sh/sh1.png)
 
-| CSS 模式 — Bilibili 弹幕 | Canvas 模式 — Niconico 评论艺术 |
+| CSS Mode — Bilibili Danmaku | Canvas Mode — Niconico Comment Art |
 |:---:|:---:|
 | ![CSS Mode - Bilibili](sh/sidebar-bilibili-file.css.png) | ![Canvas Mode - Comment Art](sh/niconico-json-siderbar-comment-art.png) |
 
@@ -252,9 +252,9 @@ For the full text of the MIT License, see: https://opensource.org/licenses/MIT
 
 ### Patent Notice (niconicomments)
 
-niconicomments 作者提醒：无论是否使用该库，实现「实时获取评论 → 画面渲染 → 评论投稿」这一完整流程可能涉及日本专利。详情请参阅 [ABOUT_PATENT.md](https://github.com/xpadev-net/niconicomments/blob/develop/ABOUT_PATENT.md)。
+The niconicomments author notes that implementing the complete flow of "real-time comment fetching → screen rendering → comment posting" may involve Japanese patents, regardless of whether this library is used. See [ABOUT_PATENT.md](https://github.com/xpadev-net/niconicomments/blob/develop/ABOUT_PATENT.md) for details.
 
-本插件仅用于本地播放已保存的评论文件，不涉及实时获取或投稿功能，因此不涉及上述专利问题。
+This plugin is used solely for local playback of saved comment files and does not involve real-time fetching or posting functionality, so it does not fall under the above patent concerns.
 
 ---
 
