@@ -43,7 +43,6 @@ var state = {
 function updateCanvasModeUI() {
   var isCanvas = state.renderMode === 'canvas';
   if (durationSection) durationSection.style.display = isCanvas ? 'none' : '';
-  if (fontsizeSection) fontsizeSection.style.display = isCanvas ? 'none' : '';
   if (laneLimitSection) laneLimitSection.style.display = isCanvas ? 'none' : '';
   if (blockSection) blockSection.style.display = isCanvas ? 'none' : '';
   var canvasHint = document.querySelector('.canvas-hint');
@@ -65,7 +64,7 @@ var i18n = {
     danmaku_visible: "Danmaku On",
     render_canvas: "Canvas Render",
     render_canvas_hint: "Better compatibility with Comment Art",
-    render_canvas_note: "Opacity is available",
+    render_canvas_note: "Opacity, Font Scale are available",
     canvas_mode: "Mode",
     canvas_mode_default: "Auto",
     canvas_mode_html5: "HTML5",
@@ -84,7 +83,7 @@ var i18n = {
     danmaku_visible: "コメント表示",
     render_canvas: "Canvas描画",
     render_canvas_hint: "コメントアートとの互換性が高い",
-    render_canvas_note: "透明度が有効",
+    render_canvas_note: "透明度・フォント倍率が有効",
     canvas_mode: "モード",
     canvas_mode_default: "自動",
     canvas_mode_html5: "HTML5",
@@ -103,7 +102,7 @@ var i18n = {
     danmaku_visible: "弹幕显示",
     render_canvas: "Canvas渲染",
     render_canvas_hint: "对高级弹幕兼容性更好",
-    render_canvas_note: "透明度可用",
+    render_canvas_note: "透明度、字体缩放可用",
     canvas_mode: "模式",
     canvas_mode_default: "自动",
     canvas_mode_html5: "HTML5",
