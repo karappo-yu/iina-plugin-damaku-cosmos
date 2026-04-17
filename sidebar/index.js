@@ -33,8 +33,10 @@ var state = {
   danmakuFileName: null,
   danmakuRelativePath: null,
   danmakuLoaded: false,
-  opacity: 0.7,
-  fontScale: 1.0,
+  cssOpacity: 0.7,
+  canvasOpacity: 0.8,
+  cssFontScale: 1.0,
+  canvasFontScale: 1.0,
   speed: 680,
   scrollDuration: 8000,
   blockScroll: false,
@@ -43,6 +45,14 @@ var state = {
   blockForceLane: false,
   maxLaneRatio: 1.0,
 };
+
+function getActiveOpacity() {
+  return state.renderMode === 'canvas' ? state.canvasOpacity : state.cssOpacity;
+}
+
+function getActiveFontScale() {
+  return state.renderMode === 'canvas' ? state.canvasFontScale : state.cssFontScale;
+}
 
 function isCanvasSupported() {
   return state.danmakuType === 'nico-xml' || state.danmakuType === 'nico-json';
@@ -188,10 +198,10 @@ function updateUI() {
   toggleDanmaku.disabled = !state.danmakuLoaded;
   renderModeCanvas.checked = state.renderMode === 'canvas';
   renderModeCanvas.disabled = !isCanvasSupported();
-  opacitySlider.value = state.opacity;
-  opacityValue.textContent = Math.round(state.opacity * 100) + "%";
-  fontsizeSlider.value = Math.round(state.fontScale * 100);
-  fontsizeValue.textContent = Math.round(state.fontScale * 100) + "%";
+  opacitySlider.value = getActiveOpacity();
+  opacityValue.textContent = Math.round(getActiveOpacity() * 100) + "%";
+  fontsizeSlider.value = Math.round(getActiveFontScale() * 100);
+  fontsizeValue.textContent = Math.round(getActiveFontScale() * 100) + "%";
   durationSlider.value = state.scrollDuration;
   durationValue.textContent = (state.scrollDuration / 1000).toFixed(1) + "s";
   maxLaneSlider.value = Math.round(state.maxLaneRatio * 100);
@@ -237,6 +247,9 @@ renderModeCanvas.addEventListener("change", function () {
   state.renderMode = mode;
   updateCanvasModeUI();
   iina.postMessage("set-render-mode", { mode: mode });
+  iina.postMessage("set-opacity", { opacity: getActiveOpacity() });
+  iina.postMessage("set-fontscale", { scale: getActiveFontScale() });
+  updateUI();
 });
 
 canvasModeSelect.addEventListener("change", function () {
@@ -247,12 +260,22 @@ canvasModeSelect.addEventListener("change", function () {
 
 opacitySlider.addEventListener("input", function () {
   var val = parseFloat(opacitySlider.value);
+  if (state.renderMode === 'canvas') {
+    state.canvasOpacity = val;
+  } else {
+    state.cssOpacity = val;
+  }
   opacityValue.textContent = Math.round(val * 100) + "%";
   iina.postMessage("set-opacity", { opacity: val });
 });
 
 fontsizeSlider.addEventListener("input", function () {
   var val = parseFloat(fontsizeSlider.value) / 100;
+  if (state.renderMode === 'canvas') {
+    state.canvasFontScale = val;
+  } else {
+    state.cssFontScale = val;
+  }
   fontsizeValue.textContent = Math.round(val * 100) + "%";
   iina.postMessage("set-fontscale", { scale: val });
 });
@@ -278,8 +301,10 @@ iina.onMessage("danmaku-state", function (data) {
   if (data.enabled !== undefined) state.enabled = data.enabled;
   if (data.renderMode !== undefined) state.renderMode = data.renderMode;
   if (data.canvasMode !== undefined) state.canvasMode = data.canvasMode;
-  if (data.opacity !== undefined) state.opacity = data.opacity;
-  if (data.fontScale !== undefined) state.fontScale = data.fontScale;
+  if (data.cssOpacity !== undefined) state.cssOpacity = data.cssOpacity;
+  if (data.canvasOpacity !== undefined) state.canvasOpacity = data.canvasOpacity;
+  if (data.cssFontScale !== undefined) state.cssFontScale = data.cssFontScale;
+  if (data.canvasFontScale !== undefined) state.canvasFontScale = data.canvasFontScale;
   if (data.speed !== undefined) state.speed = data.speed;
   if (data.scrollDuration !== undefined) state.scrollDuration = data.scrollDuration;
   if (data.blockForceLane !== undefined) state.blockForceLane = data.blockForceLane;

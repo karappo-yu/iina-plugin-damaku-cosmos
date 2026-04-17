@@ -9,14 +9,25 @@ var preferences = iina.preferences;
 var mpv = iina.mpv;
 
 var danmakuEnabled = preferences.get("danmakuEnabled");
-var currentOpacity = preferences.get("danmakuOpacity");
-var currentFontScale = preferences.get("danmakuFontScale");
+var cssOpacity = preferences.get("danmakuOpacity") || 0.7;
+var canvasOpacity = preferences.get("danmakuCanvasOpacity") || 0.8;
+var cssFontScale = preferences.get("danmakuFontScale") || 1.0;
+var canvasFontScale = preferences.get("danmakuCanvasFontScale") || 1.0;
 var currentSpeed = preferences.get("danmakuSpeed");
 var currentScrollDuration = preferences.get("scrollDuration");
 var currentBlockForceLane = preferences.get("blockForceLane");
 var currentMaxLaneRatio = preferences.get("maxLaneRatio") !== undefined ? preferences.get("maxLaneRatio") : 1.0;
 var currentPlaybackSpeed = 1.0;
+var currentRenderMode = 'css';
 var overlayReady = false;
+
+function getActiveOpacity() {
+  return currentRenderMode === 'canvas' ? canvasOpacity : cssOpacity;
+}
+
+function getActiveFontScale() {
+  return currentRenderMode === 'canvas' ? canvasFontScale : cssFontScale;
+}
 var pendingDanmaku = null;
 var currentVideoUrl = null;
 var timePosListenerID = null;
@@ -228,8 +239,8 @@ function loadDanmakuForVideo(url) {
 
   var payload = {
     xmlContent: hexContent,
-    opacity: currentOpacity,
-    fontScale: currentFontScale,
+    opacity: getActiveOpacity(),
+    fontScale: getActiveFontScale(),
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
   };
@@ -251,8 +262,8 @@ function markOverlayReady() {
   overlay.postMessage("ack", {});
 
   overlay.postMessage("apply-settings", {
-    opacity: currentOpacity,
-    fontScale: currentFontScale,
+    opacity: getActiveOpacity(),
+    fontScale: getActiveFontScale(),
     speed: currentSpeed,
     scrollDuration: currentScrollDuration,
     blockForceLane: currentBlockForceLane,
@@ -328,15 +339,25 @@ function registerSidebarHandlers() {
   });
 
   sidebar.onMessage("set-opacity", function (data) {
-    currentOpacity = data.opacity;
-    preferences.set("danmakuOpacity", currentOpacity);
+    if (currentRenderMode === 'canvas') {
+      canvasOpacity = data.opacity;
+      preferences.set("danmakuCanvasOpacity", canvasOpacity);
+    } else {
+      cssOpacity = data.opacity;
+      preferences.set("danmakuOpacity", cssOpacity);
+    }
     preferences.sync();
     overlay.postMessage("set-opacity", { opacity: data.opacity });
   });
 
   sidebar.onMessage("set-fontscale", function (data) {
-    currentFontScale = data.scale;
-    preferences.set("danmakuFontScale", currentFontScale);
+    if (currentRenderMode === 'canvas') {
+      canvasFontScale = data.scale;
+      preferences.set("danmakuCanvasFontScale", canvasFontScale);
+    } else {
+      cssFontScale = data.scale;
+      preferences.set("danmakuFontScale", cssFontScale);
+    }
     preferences.sync();
     overlay.postMessage("set-fontscale", { scale: data.scale });
   });
@@ -373,6 +394,7 @@ function registerSidebarHandlers() {
   });
 
   sidebar.onMessage("set-render-mode", function (data) {
+    currentRenderMode = data.mode;
     overlay.postMessage("set-render-mode", { mode: data.mode });
   });
 
@@ -383,8 +405,10 @@ function registerSidebarHandlers() {
   sidebar.onMessage("request-state", function () {
     sidebar.postMessage("danmaku-state", {
       enabled: danmakuEnabled,
-      opacity: currentOpacity,
-      fontScale: currentFontScale,
+      cssOpacity: cssOpacity,
+      canvasOpacity: canvasOpacity,
+      cssFontScale: cssFontScale,
+      canvasFontScale: canvasFontScale,
       speed: currentSpeed,
       scrollDuration: currentScrollDuration,
       blockForceLane: currentBlockForceLane,
@@ -421,8 +445,8 @@ function registerSidebarHandlers() {
       updateDanmakuStatus({ fileType: manualFileType, fileName: manualFileName, relativePath: manualRelPath, isLoaded: true });
       overlay.postMessage("load-danmaku", {
         xmlContent: hexContent,
-        opacity: currentOpacity,
-        fontScale: currentFontScale,
+        opacity: getActiveOpacity(),
+        fontScale: getActiveFontScale(),
         speed: currentSpeed,
         scrollDuration: currentScrollDuration,
       });
@@ -550,8 +574,8 @@ menu.addItem(
       updateDanmakuStatus({ fileType: manualFileType, fileName: manualFileName, relativePath: manualRelPath, isLoaded: true });
       overlay.postMessage("load-danmaku", {
         xmlContent: hexContent,
-        opacity: currentOpacity,
-        fontScale: currentFontScale,
+        opacity: getActiveOpacity(),
+        fontScale: getActiveFontScale(),
         speed: currentSpeed,
         scrollDuration: currentScrollDuration,
       });
