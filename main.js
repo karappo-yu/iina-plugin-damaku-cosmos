@@ -15,11 +15,13 @@ var currentSpeed = preferences.get("danmakuSpeed");
 var currentScrollDuration = preferences.get("scrollDuration");
 var currentBlockForceLane = preferences.get("blockForceLane");
 var currentMaxLaneRatio = preferences.get("maxLaneRatio") !== undefined ? preferences.get("maxLaneRatio") : 1.0;
+var currentPlaybackSpeed = 1.0;
 var overlayReady = false;
 var pendingDanmaku = null;
 var currentVideoUrl = null;
 var timePosListenerID = null;
 var windowScaleListenerID = null;
+var speedListenerID = null;
 
 function filePathFromUrl(url) {
   if (!url) return null;
@@ -186,17 +188,30 @@ function setObserver(start) {
     event.off("mpv.window-scale.changed", windowScaleListenerID);
     windowScaleListenerID = null;
   }
+  if (speedListenerID) {
+    event.off("mpv.speed.changed", speedListenerID);
+    speedListenerID = null;
+  }
 
-  if (start && !core.status.paused && overlayReady && danmakuEnabled) {
+  if (start && overlayReady && danmakuEnabled) {
     timePosListenerID = event.on("mpv.time-pos.changed", function (t) {
       overlay.postMessage("time-update", { time: t });
     });
     windowScaleListenerID = event.on("mpv.window-scale.changed", function () {
       overlay.postMessage("resize", {});
     });
+    speedListenerID = event.on("mpv.speed.changed", function (speed) {
+      currentPlaybackSpeed = speed;
+      overlay.postMessage("playback-speed", { speed: speed });
+    });
     var t = mpv.getNumber("time-pos");
     if (t !== undefined && t !== null) {
       overlay.postMessage("time-update", { time: t });
+    }
+    var speed = mpv.getNumber("speed");
+    if (speed !== undefined && speed !== null) {
+      currentPlaybackSpeed = speed;
+      overlay.postMessage("playback-speed", { speed: speed });
     }
     overlay.postMessage("resize", {});
   }
@@ -307,7 +322,6 @@ event.on("mpv.pause.changed", function () {
   if (!overlayReady) return;
   var paused = core.status.paused;
   overlay.postMessage("pause-state", { paused: paused });
-  setObserver(!paused);
 });
 
 overlay.onMessage("danmaku-error", function (data) {
