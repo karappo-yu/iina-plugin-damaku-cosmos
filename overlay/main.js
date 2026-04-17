@@ -51,10 +51,32 @@ function canvasGetCurrentTime() {
 
 function detectNicoFormat(data) {
   if (Array.isArray(data) && data.length > 0) {
-    if (data[0].fork !== undefined && data[0].comments !== undefined) return 'v1';
+    if (data[0].comments !== undefined && Array.isArray(data[0].comments)) return 'v1';
     if (data[0].chat !== undefined) return 'legacy';
   }
   return 'legacy';
+}
+
+function ensureV1Fields(data) {
+  if (!Array.isArray(data)) return data;
+  return data.map(function(thread, i) {
+    if (thread.comments === undefined || !Array.isArray(thread.comments)) return thread;
+    var t = Object.assign({}, thread);
+    if (t.id === undefined) t.id = i;
+    if (t.fork === undefined) t.fork = String(i);
+    if (t.commentCount === undefined) t.commentCount = t.comments.length;
+    t.comments = t.comments.map(function(c) {
+      var comment = Object.assign({}, c);
+      if (comment.score === undefined) comment.score = 0;
+      if (comment.postedAt === undefined) comment.postedAt = '1970-01-01T00:00:00+09:00';
+      if (comment.nicoruCount === undefined) comment.nicoruCount = 0;
+      if (comment.nicoruId === undefined) comment.nicoruId = null;
+      if (comment.source === undefined) comment.source = 'trunk';
+      if (comment.isMyPost === undefined) comment.isMyPost = false;
+      return comment;
+    });
+    return t;
+  });
 }
 
 function buildCanvasPlugins() {
@@ -266,8 +288,8 @@ iina.onMessage("load-danmaku", (data) => {
     const rawStr = decodeURIComponent(encodedStr);
     var parsed = JSON.parse(rawStr);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      if (parsed[0].fork !== undefined && parsed[0].comments !== undefined) {
-        nicoRawData = parsed;
+      if (parsed[0].comments !== undefined && Array.isArray(parsed[0].comments)) {
+        nicoRawData = ensureV1Fields(parsed);
         danmakuType = 'nico-json';
       } else if (parsed[0].chat !== undefined) {
         nicoRawData = parsed;
@@ -470,4 +492,4 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-setTimeout(() => iina.postMessage("overlay-ready", {}), 300);
+iina.postMessage("overlay-ready", {});

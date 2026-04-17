@@ -71,6 +71,8 @@ function nicoXmlToV1Json(xmlStr) {
     var date = getXmlAttr(attrs, 'date');
     var no = getXmlAttr(attrs, 'no');
     var premium = getXmlAttr(attrs, 'premium');
+    var dateNum = parseInt(date) || 0;
+    var postedAt = dateNum > 0 ? new Date(dateNum * 1000).toISOString().replace(/\.000Z$/, '+09:00') : '1970-01-01T00:00:00+09:00';
     comments.push({
       id: no || "0",
       no: parseInt(no) || 0,
@@ -78,12 +80,16 @@ function nicoXmlToV1Json(xmlStr) {
       body: text,
       commands: mail ? mail.split(/\s+/).filter(function(s) { return s; }) : [],
       userId: userId || "",
-      date: parseInt(date) || 0,
-      dateUsec: 0,
       isPremium: premium === "1",
+      score: 0,
+      postedAt: postedAt,
+      nicoruCount: 0,
+      nicoruId: null,
+      source: "trunk",
+      isMyPost: false
     });
   }
-  return JSON.stringify([{ fork: 0, comments: comments }]);
+  return JSON.stringify([{ id: 0, fork: "0", commentCount: comments.length, comments: comments }]);
 }
 
 function getXmlAttr(attrs, name) {
@@ -533,10 +539,14 @@ menu.addItem(
         return;
       }
       core.osd("读取到内容长度: " + xmlContent.length);
-      var hexContent = stringToHex(xmlContent);
+      var manualFileType = detectDanmakuFileType(xmlContent);
+      var manualSendContent = xmlContent;
+      if (manualFileType === 'nico-xml') {
+        manualSendContent = nicoXmlToV1Json(xmlContent);
+      }
+      var hexContent = stringToHex(manualSendContent);
       var manualFileName = path.split("/").pop();
       var manualRelPath = manualFileName;
-      var manualFileType = detectDanmakuFileType(xmlContent);
       updateDanmakuStatus({ fileType: manualFileType, fileName: manualFileName, relativePath: manualRelPath, isLoaded: true });
       overlay.postMessage("load-danmaku", {
         xmlContent: hexContent,
