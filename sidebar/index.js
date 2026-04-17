@@ -92,9 +92,9 @@ function updateEnabledUI() {
   settingsSections.forEach(function(sec) {
     if (sec) sec.style.display = show ? '' : 'none';
   });
+  updateDanmakuInfoUI();
   if (show) {
     updateCanvasModeUI();
-    updateDanmakuInfoUI();
   }
 }
 

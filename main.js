@@ -506,8 +506,12 @@ menu.addItem(
       core.osd("已发送弹幕: " + path.split("/").pop());
       if (!danmakuEnabled) {
         danmakuEnabled = true;
+        preferences.set("danmakuEnabled", true);
+        preferences.sync();
+        overlay.postMessage("toggle-danmaku", { enabled: true });
         overlay.show();
         setObserver(true);
+        sidebar.postMessage("danmaku-state", { enabled: true });
       }
     });
   })
