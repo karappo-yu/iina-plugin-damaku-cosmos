@@ -5,7 +5,7 @@
  * 支持两种渲染模式：CSS模式（默认）和Canvas模式（niconicomments）。
  */
 
-// --- 引擎状态 ---
+// --- 引擎状态（视频层面，两种模式共用）---
 let allDanmaku = [];
 let currentIndex = 0;
 let lastTime = 0;
@@ -13,20 +13,24 @@ let isPaused = false;
 let lastReverseState = false;
 let lastSeekDisabled = false;
 
-// --- 动态参数 ---
-let currentOpacity = 0.8;
-let currentFontScale = 1.0;
+// --- CSS模式专用参数 ---
+let cssOpacity = 0.8;
+let cssFontScale = 1.0;
+
+// --- Canvas模式专用参数 ---
+let canvasOpacity = 0.8;
+let canvasFontScale = 1.0;
+let canvasNicoMode = 'default'; // 'default' | 'html5' | 'flash'
+let canvasIsPlaying = false;
+let canvasPlaybackRate = 1.0;
+let canvasVideoAnchorTime = 0;
+let canvasSystemAnchorTime = 0;
 
 // --- 渲染模式 ---
 let renderMode = 'css'; // 'css' | 'canvas'
 let niconiComments = null;
 let nicoRawData = null;
 let canvasRafId = null;
-
-let canvasIsPlaying = false;
-let canvasPlaybackRate = 1.0;
-let canvasVideoAnchorTime = 0;
-let canvasSystemAnchorTime = 0;
 
 function isCanvasMode() {
   return renderMode === 'canvas';
@@ -67,7 +71,7 @@ function initCanvasRenderer(data) {
 
   canvas.width = 1920;
   canvas.height = 1080;
-  canvas.style.opacity = currentOpacity;
+  canvas.style.opacity = canvasOpacity;
 
   if (niconiComments) {
     niconiComments.clear();
@@ -77,8 +81,9 @@ function initCanvasRenderer(data) {
 
   niconiComments = new NiconiComments(renderer, data, {
     format: detectNicoFormat(data),
+    mode: canvasNicoMode,
     keepCA: true,
-    scale: currentFontScale,
+    scale: canvasFontScale,
     config: {
       plugins: buildCanvasPlugins(),
     },
@@ -227,16 +232,15 @@ iina.onMessage("time-update", (data) => {
 });
 
 iina.onMessage("load-danmaku", (data) => {
-  // 设置参数
   if (data.fontScale) {
-    currentFontScale = data.fontScale;
+    cssFontScale = data.fontScale;
     setRendererConfig({ fontScale: data.fontScale });
     setLaneConfig({ fontScale: data.fontScale });
   }
   if (data.scrollDuration) setRendererConfig({ scrollDuration: data.scrollDuration });
   if (data.opacity) {
-    currentOpacity = data.opacity;
-    document.documentElement.style.setProperty('--global-opacity', currentOpacity);
+    cssOpacity = data.opacity;
+    document.documentElement.style.setProperty('--global-opacity', data.opacity);
   }
   updateLanes();
 
@@ -344,22 +348,25 @@ iina.onMessage("toggle-danmaku", (data) => {
 });
 
 iina.onMessage("set-opacity", (data) => {
-  currentOpacity = data.opacity;
-  document.documentElement.style.setProperty('--global-opacity', currentOpacity);
   if (isCanvasMode()) {
+    canvasOpacity = data.opacity;
     const canvas = document.getElementById('niconicomments-canvas');
-    if (canvas) canvas.style.opacity = currentOpacity;
+    if (canvas) canvas.style.opacity = data.opacity;
+  } else {
+    cssOpacity = data.opacity;
+    document.documentElement.style.setProperty('--global-opacity', data.opacity);
   }
 });
 
 iina.onMessage("set-fontscale", (data) => {
-  currentFontScale = data.scale;
-  setRendererConfig({ fontScale: data.scale });
-  setLaneConfig({ fontScale: data.scale });
-  updateLanes();
   if (isCanvasMode()) {
+    canvasFontScale = data.scale;
     if (nicoRawData) initCanvasRenderer(nicoRawData);
   } else {
+    cssFontScale = data.scale;
+    setRendererConfig({ fontScale: data.scale });
+    setLaneConfig({ fontScale: data.scale });
+    updateLanes();
     clearDanmakuCaches(allDanmaku);
     handleSeek(lastTime);
   }
@@ -381,22 +388,28 @@ iina.onMessage("clear-danmaku", () => {
 
 iina.onMessage("apply-settings", (data) => {
   if (data.opacity !== undefined) {
-    currentOpacity = data.opacity;
-    document.documentElement.style.setProperty('--global-opacity', currentOpacity);
     if (isCanvasMode()) {
+      canvasOpacity = data.opacity;
       const canvas = document.getElementById('niconicomments-canvas');
-      if (canvas) canvas.style.opacity = currentOpacity;
+      if (canvas) canvas.style.opacity = data.opacity;
+    } else {
+      cssOpacity = data.opacity;
+      document.documentElement.style.setProperty('--global-opacity', data.opacity);
     }
   }
   if (data.fontScale !== undefined) {
-    currentFontScale = data.fontScale;
-    setRendererConfig({ fontScale: data.fontScale });
-    setLaneConfig({ fontScale: data.fontScale });
+    if (isCanvasMode()) {
+      canvasFontScale = data.fontScale;
+    } else {
+      cssFontScale = data.fontScale;
+      setRendererConfig({ fontScale: data.fontScale });
+      setLaneConfig({ fontScale: data.fontScale });
+    }
   }
   if (data.scrollDuration !== undefined) setRendererConfig({ scrollDuration: data.scrollDuration });
   if (data.blockForceLane !== undefined) setRendererConfig({ blockForceLane: data.blockForceLane });
   if (data.maxLaneRatio !== undefined) setLaneConfig({ maxLaneRatio: data.maxLaneRatio });
-  updateLanes();
+  if (!isCanvasMode()) updateLanes();
 });
 
 iina.onMessage("block-type", (data) => {
@@ -418,6 +431,13 @@ iina.onMessage("set-lane-limit", (data) => {
 
 iina.onMessage("set-render-mode", (data) => {
   switchRenderMode(data.mode);
+});
+
+iina.onMessage("set-canvas-mode", (data) => {
+  canvasNicoMode = data.mode;
+  if (isCanvasMode() && nicoRawData) {
+    initCanvasRenderer(nicoRawData);
+  }
 });
 
 // ===================== 初始化 =====================

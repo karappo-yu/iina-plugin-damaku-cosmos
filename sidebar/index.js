@@ -1,5 +1,6 @@
 var toggleDanmaku = document.getElementById("toggle-danmaku");
 var renderModeCanvas = document.getElementById("render-mode-canvas");
+var canvasModeSelect = document.getElementById("canvas-mode-select");
 var opacitySlider = document.getElementById("opacity-slider");
 var opacityValue = document.getElementById("opacity-value");
 var fontsizeSlider = document.getElementById("fontsize-slider");
@@ -27,6 +28,7 @@ var settingsSections = [canvasSection, laneLimitSection, opacitySection, fontsiz
 var state = {
   enabled: true,
   renderMode: 'css',
+  canvasMode: 'default',
   opacity: 0.7,
   fontScale: 1.0,
   speed: 680,
@@ -46,6 +48,8 @@ function updateCanvasModeUI() {
   if (blockSection) blockSection.style.display = isCanvas ? 'none' : '';
   var canvasHint = document.querySelector('.canvas-hint');
   if (canvasHint) canvasHint.style.display = isCanvas ? '' : 'none';
+  var canvasOptions = document.querySelector('.canvas-mode-options');
+  if (canvasOptions) canvasOptions.style.display = isCanvas ? '' : 'none';
 }
 
 function updateEnabledUI() {
@@ -62,6 +66,10 @@ var i18n = {
     render_canvas: "Canvas Render",
     render_canvas_hint: "Better compatibility with Comment Art",
     render_canvas_note: "Opacity is available",
+    canvas_mode: "Mode",
+    canvas_mode_default: "Auto",
+    canvas_mode_html5: "HTML5",
+    canvas_mode_flash: "Flash",
     opacity: "Opacity",
     font_scale: "Font Scale",
     scroll_duration: "Scroll Duration",
@@ -77,6 +85,10 @@ var i18n = {
     render_canvas: "Canvas描画",
     render_canvas_hint: "コメントアートとの互換性が高い",
     render_canvas_note: "透明度が有効",
+    canvas_mode: "モード",
+    canvas_mode_default: "自動",
+    canvas_mode_html5: "HTML5",
+    canvas_mode_flash: "Flash",
     opacity: "透明度",
     font_scale: "フォント倍率",
     scroll_duration: "スクロール時間",
@@ -92,6 +104,10 @@ var i18n = {
     render_canvas: "Canvas渲染",
     render_canvas_hint: "对高级弹幕兼容性更好",
     render_canvas_note: "透明度可用",
+    canvas_mode: "模式",
+    canvas_mode_default: "自动",
+    canvas_mode_html5: "HTML5",
+    canvas_mode_flash: "Flash",
     opacity: "透明度",
     font_scale: "字体缩放",
     scroll_duration: "滚动时长",
@@ -135,6 +151,7 @@ function updateUI() {
   blockTop.checked = state.blockTop;
   blockBottom.checked = state.blockBottom;
   blockForceLane.checked = state.blockForceLane;
+  if (canvasModeSelect) canvasModeSelect.value = state.canvasMode || 'default';
 }
 
 function sendBlockType() {
@@ -159,6 +176,12 @@ renderModeCanvas.addEventListener("change", function () {
   state.renderMode = mode;
   updateCanvasModeUI();
   iina.postMessage("set-render-mode", { mode: mode });
+});
+
+canvasModeSelect.addEventListener("change", function () {
+  var mode = canvasModeSelect.value;
+  state.canvasMode = mode;
+  iina.postMessage("set-canvas-mode", { mode: mode });
 });
 
 opacitySlider.addEventListener("input", function () {
@@ -193,6 +216,7 @@ maxLaneSlider.addEventListener("input", function () {
 iina.onMessage("danmaku-state", function (data) {
   if (data.enabled !== undefined) state.enabled = data.enabled;
   if (data.renderMode !== undefined) state.renderMode = data.renderMode;
+  if (data.canvasMode !== undefined) state.canvasMode = data.canvasMode;
   if (data.opacity !== undefined) state.opacity = data.opacity;
   if (data.fontScale !== undefined) state.fontScale = data.fontScale;
   if (data.speed !== undefined) state.speed = data.speed;
@@ -201,6 +225,7 @@ iina.onMessage("danmaku-state", function (data) {
   if (data.maxLaneRatio !== undefined) state.maxLaneRatio = data.maxLaneRatio;
   updateUI();
   updateEnabledUI();
+  if (canvasModeSelect) canvasModeSelect.value = state.canvasMode || 'default';
 });
 
 applyI18n();

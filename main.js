@@ -283,6 +283,10 @@ function registerSidebarHandlers() {
     overlay.postMessage("set-render-mode", { mode: data.mode });
   });
 
+  sidebar.onMessage("set-canvas-mode", function (data) {
+    overlay.postMessage("set-canvas-mode", { mode: data.mode });
+  });
+
   sidebar.onMessage("request-state", function () {
     sidebar.postMessage("danmaku-state", {
       enabled: danmakuEnabled,
