@@ -154,6 +154,9 @@ function stringToHex(str) {
 
 function loadDanmakuForVideo(url) {
   currentVideoUrl = url;
+  currentRenderMode = 'css';
+  overlay.postMessage("set-render-mode", { mode: 'css' });
+  sidebar.postMessage("danmaku-state", { renderMode: 'css' });
 
   if (core.status.isNetworkResource) {
     core.osd("网络资源，跳过弹幕加载");
