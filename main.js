@@ -18,7 +18,7 @@ var currentBlockForceLane = preferences.get("blockForceLane");
 var currentMaxLaneRatio = preferences.get("maxLaneRatio") !== undefined ? preferences.get("maxLaneRatio") : 1.0;
 var cssFontFamily = preferences.get("cssFontFamily") || "default";
 var cssFontWeight = preferences.get("cssFontWeight") || 800;
-var cssStrokeWidth = preferences.get("cssStrokeWidth") !== undefined ? preferences.get("cssStrokeWidth") : 0.16;
+var cssStrokeWidth = preferences.get("cssStrokeWidth") !== undefined ? preferences.get("cssStrokeWidth") : 0.1;
 var currentPlaybackSpeed = 1.0;
 var currentRenderMode = 'css';
 var overlayReady = false;

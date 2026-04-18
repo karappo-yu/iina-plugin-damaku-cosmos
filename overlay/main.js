@@ -18,7 +18,7 @@ let cssOpacity = 0.8;
 let cssFontScale = 1.0;
 let cssFontFamily = 'default';
 let cssFontWeight = 800;
-let cssStrokeWidth = 0.16;
+let cssStrokeWidth = 0.1;
 
 // --- Canvas模式专用参数 ---
 let canvasOpacity = 0.8;
