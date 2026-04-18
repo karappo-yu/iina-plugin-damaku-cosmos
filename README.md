@@ -88,7 +88,6 @@ IINA 弹幕插件，支持 Niconico 和 Bilibili 格式弹幕，提供 CSS 和 C
 
 - 文件名包含特殊字符（如 `[`、`]`）可能导致自动加载失败
 - 最小化窗口后再恢复，弹幕会重新渲染（已知限制）
-- Canvas 模式下，Niconico XML 文件会在加载时自动转换为 v1 JSON 格式
 
 ---
 
@@ -134,29 +133,28 @@ IINA 弹幕插件，支持 Niconico 和 Bilibili 格式弹幕，提供 CSS 和 C
 |------|-----------|--------------|
 | 滑らかさ | ✅ 最適 | ⚠️ WebKit で低下 |
 | 透明度 | ✅ | ✅ |
-| フォント倍率 | ✅ | ✅ |
+| フォント倍率 | ✅ | ❌ |
 | スクロール時間 | ✅ | ❌ |
 | コメント屏蔽 | ✅ | ❌ |
 | 軌道制限 | ✅ | ❌ |
 | コメントアート互換 | ⚠️ 一部 | ✅ 完全 |
-| Niconico 形式 | ✅ | ✅ |
+| Niconico 形式 | ✅ | ✅ (JSON のみ) |
 | Bilibili 形式 | ✅ | ❌ |
 
-> Canvas モードは Niconico 形式のコメントのみ対応です。新しい動画を開くとデフォルトで CSS モードになります。Canvas モードへの切り替えは手動で行ってください。
+> Canvas モードは Niconico JSON 形式のコメントのみ対応です。新しい動画を開くとデフォルトで CSS モードになります。Canvas モードへの切り替えは手動で行ってください。
 
 ### 対応形式
 
-| 形式 | ファイル種別 | 説明 |
-|------|------------|------|
-| Niconico XML | `.xml` | `<chat>` タグ形式。Canvas モード使用時に v1 JSON へ自動変換 |
-| Niconico JSON | `.json` | v1 API 形式。Canvas モードで直接使用可能 |
-| Bilibili XML | `.xml` | `<d>` タグ形式。CSS モードのみ対応 |
+| 形式 | CSS モード | Canvas モード |
+|------|-----------|--------------|
+| Niconico XML | ✅ | ❌ |
+| Niconico JSON | ✅ | ✅ |
+| Bilibili XML | ✅ | ❌ |
 
 ### 注意事項
 
 - ファイル名に特殊文字（`[`、`]`など）が含まれる場合、自動読み込みに失敗する可能性がある
 - ウィンドウを最小化してから復元すると、コメントが再レンダリングされる（既知の制限）
-- Canvas モードでは、Niconico XML ファイルは読み込み時に v1 JSON 形式へ自動変換される
 
 ---
 
@@ -202,29 +200,28 @@ Automatically searches in the same directory with this priority:
 |---------|----------|-------------|
 | Smoothness | ✅ Best | ⚠️ Weaker on WebKit |
 | Opacity | ✅ | ✅ |
-| Font Scale | ✅ | ✅ |
+| Font Scale | ✅ | ❌ |
 | Scroll Duration | ✅ | ❌ |
 | Danmaku Blocking | ✅ | ❌ |
 | Lane Limit | ✅ | ❌ |
 | Comment Art Compat | ⚠️ Partial | ✅ Full |
-| Niconico Format | ✅ | ✅ |
+| Niconico Format | ✅ | ✅ (JSON only) |
 | Bilibili Format | ✅ | ❌ |
 
-> Canvas mode only supports Niconico format danmaku. New videos default to CSS mode; switch to Canvas mode manually.
+> Canvas mode only supports Niconico JSON format danmaku. New videos default to CSS mode; switch to Canvas mode manually.
 
 ### Supported Formats
 
-| Format | File Type | Description |
-|--------|-----------|-------------|
-| Niconico XML | `.xml` | `<chat>` tag format, auto-converted to v1 JSON for Canvas mode |
-| Niconico JSON | `.json` | v1 API format, used directly by Canvas mode |
-| Bilibili XML | `.xml` | `<d>` tag format, CSS mode only |
+| Format | CSS Mode | Canvas Mode |
+|--------|----------|-------------|
+| Niconico XML | ✅ | ❌ |
+| Niconico JSON | ✅ | ✅ |
+| Bilibili XML | ✅ | ❌ |
 
 ### Notes
 
 - Filenames with special characters (like `[`, `]`) may cause auto-load to fail
 - Minimizing and restoring the window causes danmaku to re-render (known limitation)
-- In Canvas mode, Niconico XML files are automatically converted to v1 JSON format on load
 
 ---
 

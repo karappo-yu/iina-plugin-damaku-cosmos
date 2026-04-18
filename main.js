@@ -47,14 +47,6 @@ function updateDanmakuStatus(status) {
 
 function danmakuNotFound() {
   updateDanmakuStatus({ fileType: null, fileName: null, relativePath: null, isLoaded: false });
-  if (danmakuEnabled) {
-    danmakuEnabled = false;
-    preferences.set("danmakuEnabled", false);
-    preferences.sync();
-    overlay.postMessage("toggle-danmaku", { enabled: false });
-    sidebar.postMessage("danmaku-state", { enabled: false });
-    setObserver(false);
-  }
 }
 
 function filePathFromUrl(url) {
