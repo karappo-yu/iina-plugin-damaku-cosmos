@@ -60,7 +60,8 @@ const FONT_FAMILY_MAP = {
 
 function applyCssFontPreferences() {
   const fontFamily = FONT_FAMILY_MAP[cssFontFamily] || FONT_FAMILY_MAP['default'];
-  const strokeValue = cssStrokeWidth > 0 ? cssStrokeWidth + 'vw rgba(0,0,0,0.5)' : 'none';
+  const scaledStroke = cssStrokeWidth * cssFontScale;
+  const strokeValue = scaledStroke > 0 ? scaledStroke + 'vw rgba(0,0,0,0.5)' : 'none';
   document.documentElement.style.setProperty('--dm-font-family', fontFamily);
   document.documentElement.style.setProperty('--dm-font-weight', String(cssFontWeight));
   document.documentElement.style.setProperty('--dm-stroke', strokeValue);
