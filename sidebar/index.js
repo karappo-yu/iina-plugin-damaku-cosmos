@@ -72,7 +72,7 @@ function updateDanmakuInfoUI() {
   toggleDanmaku.disabled = false;
   var nameEl = fileInfoEl ? fileInfoEl.querySelector('.danmaku-file-name') : null;
   var pathEl = fileInfoEl ? fileInfoEl.querySelector('.danmaku-file-path') : null;
-  if (nameEl) nameEl.textContent = state.danmakuFileName || '';
+  if (nameEl) nameEl.textContent = state.danmakuRelativePath || state.danmakuFileName || '';
   if (pathEl) pathEl.textContent = '';
 }
 
