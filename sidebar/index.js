@@ -94,8 +94,6 @@ function updateCanvasModeUI() {
   if (durationSection) durationSection.style.display = isCanvas ? 'none' : '';
   if (laneLimitSection) laneLimitSection.style.display = isCanvas ? 'none' : '';
   if (blockSection) blockSection.style.display = isCanvas ? 'none' : '';
-  var canvasHint = document.querySelector('.canvas-hint');
-  if (canvasHint) canvasHint.style.display = isCanvas ? '' : 'none';
   var canvasOptions = document.querySelector('.canvas-mode-options');
   if (canvasOptions) canvasOptions.style.display = isCanvas ? '' : 'none';
   var canvasUnsupported = document.querySelector('.canvas-unsupported');

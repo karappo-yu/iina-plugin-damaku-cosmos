@@ -57,63 +57,20 @@ function danmakuNotFound() {
   }
 }
 
-function detectDanmakuFileType(content) {
-  if (!content) return null;
-  var s = content.trim();
-  if (s.charAt(0) === '[') return 'nico-json';
-  if (s.charAt(0) === '<') {
-    if (s.indexOf('<packet') !== -1) return 'nico-xml';
-    if (s.indexOf('<d p=') !== -1) return 'bilibili-xml';
-  }
-  return null;
-}
-
-function nicoXmlToV1Json(xmlStr) {
-  var chatRegex = /<chat\s+([^>]*)>([\s\S]*?)<\/chat>/g;
-  var comments = [];
-  var match;
-  while ((match = chatRegex.exec(xmlStr)) !== null) {
-    var attrs = match[1];
-    var text = match[2];
-    var vpos = getXmlAttr(attrs, 'vpos');
-    var mail = getXmlAttr(attrs, 'mail');
-    var userId = getXmlAttr(attrs, 'user_id');
-    var date = getXmlAttr(attrs, 'date');
-    var no = getXmlAttr(attrs, 'no');
-    var premium = getXmlAttr(attrs, 'premium');
-    var dateNum = parseInt(date) || 0;
-    var postedAt = dateNum > 0 ? new Date(dateNum * 1000).toISOString().replace(/\.000Z$/, '+09:00') : '1970-01-01T00:00:00+09:00';
-    comments.push({
-      id: no || "0",
-      no: parseInt(no) || 0,
-      vposMs: (parseInt(vpos) || 0) * 10,
-      body: text,
-      commands: mail ? mail.split(/\s+/).filter(function(s) { return s; }) : [],
-      userId: userId || "",
-      isPremium: premium === "1",
-      score: 0,
-      postedAt: postedAt,
-      nicoruCount: 0,
-      nicoruId: null,
-      source: "trunk",
-      isMyPost: false
-    });
-  }
-  return JSON.stringify([{ id: 0, fork: "0", commentCount: comments.length, comments: comments }]);
-}
-
-function getXmlAttr(attrs, name) {
-  var regex = new RegExp(name + '="([^"]*)"');
-  var m = attrs.match(regex);
-  return m ? m[1] : null;
-}
-
 function filePathFromUrl(url) {
   if (!url) return null;
   if (url.startsWith("file://")) {
     return decodeURIComponent(url.substring(7));
   }
-  return url;
+  return null;
+}
+
+function detectDanmakuType(content) {
+  if (!content) return 'bilibili-xml';
+  var s = content.trim();
+  if (s.charAt(0) === '[') return 'nico-json';
+  if (s.indexOf('<packet') !== -1) return 'nico-xml';
+  return 'bilibili-xml';
 }
 
 function extractEpisodeNumber(videoPath) {
@@ -225,18 +182,14 @@ function loadDanmakuForVideo(url) {
     return;
   }
 
-  var fileType = detectDanmakuFileType(xmlContent);
-  var sendContent = xmlContent;
-  if (fileType === 'nico-xml') {
-    sendContent = nicoXmlToV1Json(xmlContent);
-  }
-  var hexContent = stringToHex(sendContent);
+  var hexContent = stringToHex(xmlContent);
   var danmakuFileName = danmakuPath.split("/").pop();
   var videoDir = filePathFromUrl(url).replace(/[/\\][^/\\]+$/, '');
   var relativePath = danmakuPath;
   if (danmakuPath.startsWith(videoDir + "/")) {
     relativePath = danmakuPath.substring(videoDir.length + 1);
   }
+  var fileType = detectDanmakuType(xmlContent);
   updateDanmakuStatus({ fileType: fileType, fileName: danmakuFileName, relativePath: relativePath, isLoaded: true });
 
   var payload = {
@@ -430,14 +383,10 @@ function registerSidebarHandlers() {
         return;
       }
       core.osd("读取到内容长度: " + xmlContent.length);
-      var manualFileType = detectDanmakuFileType(xmlContent);
-      var manualSendContent = xmlContent;
-      if (manualFileType === 'nico-xml') {
-        manualSendContent = nicoXmlToV1Json(xmlContent);
-      }
-      var hexContent = stringToHex(manualSendContent);
+      var hexContent = stringToHex(xmlContent);
       var manualFileName = path.split("/").pop();
       var manualRelPath = manualFileName;
+      var manualFileType = detectDanmakuType(xmlContent);
       updateDanmakuStatus({ fileType: manualFileType, fileName: manualFileName, relativePath: manualRelPath, isLoaded: true });
       overlay.postMessage("load-danmaku", {
         xmlContent: hexContent,
@@ -559,14 +508,10 @@ menu.addItem(
         return;
       }
       core.osd("读取到内容长度: " + xmlContent.length);
-      var manualFileType = detectDanmakuFileType(xmlContent);
-      var manualSendContent = xmlContent;
-      if (manualFileType === 'nico-xml') {
-        manualSendContent = nicoXmlToV1Json(xmlContent);
-      }
-      var hexContent = stringToHex(manualSendContent);
+      var hexContent = stringToHex(xmlContent);
       var manualFileName = path.split("/").pop();
       var manualRelPath = manualFileName;
+      var manualFileType = detectDanmakuType(xmlContent);
       updateDanmakuStatus({ fileType: manualFileType, fileName: manualFileName, relativePath: manualRelPath, isLoaded: true });
       overlay.postMessage("load-danmaku", {
         xmlContent: hexContent,
