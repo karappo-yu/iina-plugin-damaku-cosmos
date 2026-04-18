@@ -21,32 +21,16 @@ let cssFontScale = 1.0;
 let canvasOpacity = 0.8;
 let canvasFontScale = 1.0;
 let canvasNicoMode = 'default'; // 'default' | 'html5' | 'flash'
-let canvasIsPlaying = false;
-let canvasPlaybackRate = 1.0;
-let canvasVideoAnchorTime = 0;
-let canvasSystemAnchorTime = 0;
 
 // --- 渲染模式 ---
 let renderMode = 'css'; // 'css' | 'canvas'
 let niconiComments = null;
 let nicoRawData = null;
-let canvasRafId = null;
+let canvasIntervalId = null;
+let canvasLastTime = 0;
 
 function isCanvasMode() {
   return renderMode === 'canvas';
-}
-
-function canvasSyncAnchor(videoTimeSec) {
-  canvasVideoAnchorTime = videoTimeSec;
-  canvasSystemAnchorTime = performance.now();
-}
-
-function canvasGetCurrentTime() {
-  if (!canvasIsPlaying) {
-    return canvasVideoAnchorTime;
-  }
-  const elapsedSec = (performance.now() - canvasSystemAnchorTime) / 1000;
-  return canvasVideoAnchorTime + elapsedSec * canvasPlaybackRate;
 }
 
 function detectNicoFormat(data) {
@@ -128,28 +112,28 @@ function initCanvasRenderer(data) {
 }
 
 function destroyCanvasRenderer() {
-  if (canvasRafId) {
-    cancelAnimationFrame(canvasRafId);
-    canvasRafId = null;
-  }
-  canvasIsPlaying = false;
-  if (niconiComments) {
-    niconiComments.clear();
-    niconiComments = null;
-  }
+  stopCanvasLoop();
 }
 
 function canvasRenderLoop() {
   if (!niconiComments) return;
-  const videoTime = canvasGetCurrentTime();
-  const vpos = videoTime * 100;
-  niconiComments.drawCanvas(vpos);
-  canvasRafId = requestAnimationFrame(canvasRenderLoop);
+  niconiComments.drawCanvas(canvasLastTime);
 }
 
 function startCanvasLoop() {
-  if (canvasRafId) return;
-  canvasRafId = requestAnimationFrame(canvasRenderLoop);
+  if (canvasIntervalId) return;
+  canvasIntervalId = setInterval(canvasRenderLoop, 10);
+}
+
+function stopCanvasLoop() {
+  if (canvasIntervalId !== null) {
+    clearInterval(canvasIntervalId);
+    canvasIntervalId = null;
+  }
+  if (niconiComments) {
+    niconiComments.clear();
+    niconiComments = null;
+  }
 }
 
 function switchRenderMode(mode) {
@@ -160,8 +144,6 @@ function switchRenderMode(mode) {
 
   if (mode === 'canvas') {
     clearAllDanmaku();
-    canvasIsPlaying = !isPaused;
-    canvasSyncAnchor(lastTime / 100);
     if (nicoRawData) {
       initCanvasRenderer(nicoRawData);
       startCanvasLoop();
@@ -208,9 +190,8 @@ iina.onMessage("time-update", (data) => {
   let t = data.time * 100;
 
   if (isCanvasMode()) {
-    if (niconiComments) niconiComments.drawCanvas(t);
-    canvasSyncAnchor(data.time);
-    lastTime = t;
+    canvasLastTime = data.time * 100;
+    lastTime = canvasLastTime;
     return;
   }
 
@@ -311,8 +292,6 @@ iina.onMessage("load-danmaku", (data) => {
   iina.postMessage("danmaku-type", { type: danmakuType });
 
   if (isCanvasMode() && nicoRawData) {
-    canvasIsPlaying = !isPaused;
-    canvasSyncAnchor(0);
     initCanvasRenderer(nicoRawData);
     startCanvasLoop();
   } else {
@@ -352,18 +331,8 @@ iina.onMessage("resize", () => {
 iina.onMessage("pause-state", (data) => {
   isPaused = data.paused;
   document.body.classList.toggle('is-paused', isPaused);
-  if (isCanvasMode()) {
-    canvasIsPlaying = !isPaused;
-    canvasSyncAnchor(lastTime / 100);
-  }
 });
 
-iina.onMessage("playback-speed", (data) => {
-  if (isCanvasMode()) {
-    canvasPlaybackRate = data.speed;
-    canvasSyncAnchor(canvasGetCurrentTime());
-  }
-});
 
 iina.onMessage("toggle-danmaku", (data) => {
   setRendererConfig({ danmakuVisible: data.enabled });
