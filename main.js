@@ -254,6 +254,7 @@ function loadDanmakuForVideo(url) {
 
   var payload = {
     xmlContent: hexContent,
+    path: firstFile.path,
     opacity: getActiveOpacity(),
     fontScale: getActiveFontScale(),
     speed: currentSpeed,

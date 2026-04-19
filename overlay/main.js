@@ -313,7 +313,7 @@ iina.onMessage("load-danmaku", (data) => {
   const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
   let list = parseDanmaku(encodedStr);
 
-  var filePath = '__initial__';
+  var filePath = data.path || '__initial__';
   danmakuFileMap[filePath] = list;
 
   let dedupedList = [];
