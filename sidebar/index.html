@@ -17,12 +17,14 @@
           <span class="switch-slider"></span>
         </label>
       </div>
-      <div id="danmaku-file-info" class="danmaku-file-info" style="display:none;">
-        <div class="danmaku-file-name"></div>
-      </div>
-      <div id="danmaku-not-found" class="danmaku-not-found" style="display:none;">
-        <span data-i18n="danmaku_not_found">No danmaku file found</span>
-        <button id="manual-load-btn" class="manual-load-btn" data-i18n="manual_load">Load Danmaku</button>
+      <div id="danmaku-file-list-section" class="danmaku-file-list-section">
+        <div id="danmaku-file-list-container"></div>
+        <div class="danmaku-file-list-footer">
+          <span id="danmaku-file-count" class="danmaku-file-count"></span>
+          <div class="danmaku-file-list-actions">
+            <button id="danmaku-file-add-btn" class="danmaku-file-action-btn" data-i18n="file_add">Add</button>
+          </div>
+        </div>
       </div>
     </div>
 

@@ -13,6 +13,9 @@ let isPaused = false;
 let lastReverseState = false;
 let lastSeekDisabled = false;
 
+let danmakuFileMap = {};
+let danmakuSeenKeys = {};
+
 // --- CSS模式专用参数 ---
 let cssOpacity = 0.8;
 let cssFontScale = 1.0;
@@ -301,23 +304,34 @@ iina.onMessage("load-danmaku", (data) => {
   applyCssFontPreferences();
   updateLanes();
 
-  // 重置 Nicoscript 状态
   resetNicoScripts();
   lastReverseState = false;
 
-  // 解析弹幕数据
+  danmakuFileMap = {};
+  danmakuSeenKeys = {};
+
   const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
   let list = parseDanmaku(encodedStr);
 
-  // 排序
-  allDanmaku = list.sort((a, b) => a.t - b.t);
+  var filePath = '__initial__';
+  danmakuFileMap[filePath] = list;
 
-  // CA 层分离：识别弹幕画并分配独立 layer
+  let dedupedList = [];
+  for (let i = 0; i < list.length; i++) {
+    const d = list[i];
+    const key = d.t + '|' + d.text;
+    if (!danmakuSeenKeys[key]) {
+      danmakuSeenKeys[key] = true;
+      dedupedList.push(d);
+    }
+  }
+
+  allDanmaku = dedupedList.sort((a, b) => a.t - b.t);
+
   if (typeof assignCALayers === 'function') {
     assignCALayers(allDanmaku);
   }
 
-  // Canvas模式：解析JSON数据供niconicomments使用
   var danmakuType = 'unknown';
   try {
     const rawStr = decodeURIComponent(encodedStr);
@@ -355,6 +369,71 @@ iina.onMessage("load-danmaku", (data) => {
       switchRenderMode('css');
     }
     handleSeek(0);
+  }
+});
+
+iina.onMessage("add-danmaku-file", (data) => {
+  const filePath = data.path;
+  const encodedStr = data.xmlContent.replace(/(..)/g, '%$1');
+  let list = parseDanmaku(encodedStr);
+
+  danmakuFileMap[filePath] = list;
+
+  let newItems = [];
+  for (let i = 0; i < list.length; i++) {
+    const d = list[i];
+    const key = d.t + '|' + d.text;
+    if (!danmakuSeenKeys[key]) {
+      danmakuSeenKeys[key] = true;
+      newItems.push(d);
+    }
+  }
+
+  if (newItems.length > 0) {
+    allDanmaku = allDanmaku.concat(newItems).sort((a, b) => a.t - b.t);
+
+    if (typeof assignCALayers === 'function') {
+      assignCALayers(allDanmaku);
+    }
+
+    if (!isCanvasMode()) {
+      handleSeek(lastTime);
+    }
+  }
+});
+
+iina.onMessage("remove-danmaku-file", (data) => {
+  const filePath = data.path;
+  const removedList = danmakuFileMap[filePath];
+  if (!removedList) return;
+
+  for (let i = 0; i < removedList.length; i++) {
+    const d = removedList[i];
+    const key = d.t + '|' + d.text;
+    delete danmakuSeenKeys[key];
+  }
+
+  delete danmakuFileMap[filePath];
+
+  const removedSet = new Set(removedList);
+  allDanmaku = allDanmaku.filter(d => !removedSet.has(d));
+
+  for (const path in danmakuFileMap) {
+    const fileList = danmakuFileMap[path];
+    for (let i = 0; i < fileList.length; i++) {
+      const d = fileList[i];
+      const key = d.t + '|' + d.text;
+      danmakuSeenKeys[key] = true;
+    }
+  }
+
+  if (typeof assignCALayers === 'function') {
+    assignCALayers(allDanmaku);
+  }
+
+  if (!isCanvasMode()) {
+    clearAllDanmaku();
+    handleSeek(lastTime);
   }
 });
 
@@ -442,6 +521,8 @@ iina.onMessage("clear-danmaku", () => {
   }
   allDanmaku = [];
   currentIndex = 0;
+  danmakuFileMap = {};
+  danmakuSeenKeys = {};
   iina.postMessage("danmaku-type", { type: 'none' });
 });
 

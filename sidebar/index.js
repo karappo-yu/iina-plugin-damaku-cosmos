@@ -13,6 +13,7 @@ var blockBottom = document.getElementById("block-bottom");
 var blockForceLane = document.getElementById("block-force-lane");
 var maxLaneSlider = document.getElementById("max-lane-slider");
 var maxLaneValue = document.getElementById("max-lane-value");
+var fileAddBtn = document.getElementById("danmaku-file-add-btn");
 
 var durationSection = durationSlider.closest('.section');
 var fontsizeSection = fontsizeSlider.closest('.section');
@@ -45,6 +46,17 @@ var state = {
   maxLaneRatio: 1.0,
 };
 
+var fileListState = {
+  xmlFiles: [],
+  jsonFiles: [],
+  unknownFiles: [],
+  selectedPaths: [],
+  unknownExpanded: false,
+  errorPaths: {}
+};
+
+var checkDebounceTimer = null;
+
 function getActiveOpacity() {
   return state.renderMode === 'canvas' ? state.canvasOpacity : state.cssOpacity;
 }
@@ -54,42 +66,199 @@ function getActiveFontScale() {
 }
 
 function isCanvasSupported() {
-  return state.danmakuType === 'nico-xml' || state.danmakuType === 'nico-json';
+  if (fileListState.selectedPaths.length !== 1) return false;
+  var selectedPath = fileListState.selectedPaths[0];
+  var allFiles = fileListState.xmlFiles.concat(fileListState.jsonFiles).concat(fileListState.unknownFiles);
+  for (var i = 0; i < allFiles.length; i++) {
+    if (allFiles[i].path === selectedPath) {
+      return allFiles[i].type === 'JSON';
+    }
+  }
+  return false;
+}
+
+function isCanvasMode() {
+  return state.renderMode === 'canvas';
+}
+
+function createFileItem(fileInfo, isChecked, isDisabled) {
+  var item = document.createElement('div');
+  item.className = 'danmaku-file-item' + (isDisabled ? ' disabled' : '');
+  item.dataset.path = fileInfo.path;
+
+  var checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = isChecked;
+  checkbox.disabled = isDisabled;
+  checkbox.setAttribute('data-clickable', '');
+  checkbox.addEventListener('change', function () {
+    debouncedFileCheck(fileInfo.path, checkbox.checked);
+  });
+
+  var info = document.createElement('div');
+  info.className = 'danmaku-file-item-info';
+
+  var name = document.createElement('span');
+  name.className = 'danmaku-file-item-name';
+  name.textContent = fileInfo.filename;
+  name.title = fileInfo.filename;
+
+  var type = document.createElement('span');
+  type.className = 'danmaku-file-item-type';
+  type.textContent = fileInfo.type;
+
+  info.appendChild(name);
+  info.appendChild(type);
+
+  var pathEl = document.createElement('span');
+  pathEl.className = 'danmaku-file-item-path';
+  pathEl.textContent = fileInfo.relativePath;
+  pathEl.title = fileInfo.relativePath;
+
+  var deleteBtn = document.createElement('button');
+  deleteBtn.className = 'danmaku-file-item-delete';
+  deleteBtn.textContent = '×';
+  deleteBtn.title = 'Delete';
+  deleteBtn.setAttribute('data-clickable', '');
+  deleteBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    iina.postMessage("danmaku-file-delete", { path: fileInfo.path });
+  });
+
+  item.appendChild(checkbox);
+  item.appendChild(info);
+  item.appendChild(pathEl);
+  item.appendChild(deleteBtn);
+
+  if (fileListState.errorPaths[fileInfo.path]) {
+    var errorEl = document.createElement('div');
+    errorEl.className = 'danmaku-file-item-error';
+    errorEl.textContent = fileListState.errorPaths[fileInfo.path];
+    item.appendChild(errorEl);
+  }
+
+  return item;
+}
+
+function createFileGroup(title, files, selectedPaths, isDisabled) {
+  if (files.length === 0) return null;
+
+  var group = document.createElement('div');
+  group.className = 'danmaku-file-group';
+
+  var titleEl = document.createElement('div');
+  titleEl.className = 'danmaku-file-group-title';
+  titleEl.textContent = title;
+  group.appendChild(titleEl);
+
+  for (var i = 0; i < files.length; i++) {
+    var isChecked = selectedPaths.indexOf(files[i].path) !== -1;
+    var item = createFileItem(files[i], isChecked, isDisabled);
+    group.appendChild(item);
+  }
+
+  return group;
+}
+
+function renderFileList() {
+  var container = document.getElementById('danmaku-file-list-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  var isDisabled = isCanvasMode();
+  var hasFiles = fileListState.xmlFiles.length > 0 || fileListState.jsonFiles.length > 0 || fileListState.unknownFiles.length > 0;
+
+  var lang = getBrowserLang();
+  var xmlTitle = lang === 'zh' ? 'XML 弹幕' : lang === 'ja' ? 'XMLコメント' : 'XML Danmaku';
+  var jsonTitle = lang === 'zh' ? 'JSON 弹幕' : lang === 'ja' ? 'JSONコメント' : 'JSON Danmaku';
+  var unknownTitle = lang === 'zh' ? '未识别集数' : lang === 'ja' ? '未認識エピソード' : 'Unknown Episode';
+
+  if (fileListState.xmlFiles.length > 0) {
+    var xmlGroup = createFileGroup(xmlTitle, fileListState.xmlFiles, fileListState.selectedPaths, isDisabled);
+    if (xmlGroup) container.appendChild(xmlGroup);
+  }
+
+  if (fileListState.jsonFiles.length > 0) {
+    var jsonGroup = createFileGroup(jsonTitle, fileListState.jsonFiles, fileListState.selectedPaths, isDisabled);
+    if (jsonGroup) container.appendChild(jsonGroup);
+  }
+
+  if (fileListState.unknownFiles.length > 0) {
+    var toggleEl = document.createElement('div');
+    toggleEl.className = 'danmaku-file-unknown-toggle';
+    var arrow = document.createElement('span');
+    arrow.className = 'toggle-arrow' + (fileListState.unknownExpanded ? ' expanded' : '');
+    arrow.textContent = '▶';
+    var label = document.createElement('span');
+    label.textContent = unknownTitle + ' (' + fileListState.unknownFiles.length + ')';
+    toggleEl.appendChild(arrow);
+    toggleEl.appendChild(label);
+    toggleEl.addEventListener('click', function () {
+      fileListState.unknownExpanded = !fileListState.unknownExpanded;
+      renderFileList();
+    });
+    container.appendChild(toggleEl);
+
+    var unknownContent = document.createElement('div');
+    unknownContent.className = 'danmaku-file-unknown-content' + (fileListState.unknownExpanded ? ' expanded' : '');
+    var unknownGroup = createFileGroup('', fileListState.unknownFiles, fileListState.selectedPaths, isDisabled);
+    if (unknownGroup) unknownContent.appendChild(unknownGroup);
+    container.appendChild(unknownContent);
+  }
+
+  updateFileCount();
+}
+
+function updateFileCount() {
+  var countEl = document.getElementById('danmaku-file-count');
+  if (!countEl) return;
+  var lang = getBrowserLang();
+  var selected = fileListState.selectedPaths.length;
+  var total = fileListState.xmlFiles.length + fileListState.jsonFiles.length + fileListState.unknownFiles.length;
+  if (lang === 'zh') {
+    countEl.textContent = '已选 ' + selected + ' / ' + total + ' 个文件';
+  } else if (lang === 'ja') {
+    countEl.textContent = selected + ' / ' + total + ' ファイル選択';
+  } else {
+    countEl.textContent = selected + ' / ' + total + ' selected';
+  }
+}
+
+function debouncedFileCheck(path, checked) {
+  if (checkDebounceTimer) {
+    clearTimeout(checkDebounceTimer);
+  }
+  checkDebounceTimer = setTimeout(function () {
+    iina.postMessage("danmaku-file-check", { path: path, checked: checked });
+    checkDebounceTimer = null;
+  }, 300);
 }
 
 function updateDanmakuInfoUI() {
-  var fileInfoEl = document.getElementById('danmaku-file-info');
-  var notFoundEl = document.getElementById('danmaku-not-found');
-  if (!state.danmakuLoaded) {
-    if (fileInfoEl) fileInfoEl.style.display = 'none';
-    if (notFoundEl) notFoundEl.style.display = '';
-    toggleDanmaku.disabled = true;
+  var fileListSection = document.getElementById('danmaku-file-list-section');
+  var hasFiles = fileListState.xmlFiles.length > 0 || fileListState.jsonFiles.length > 0 || fileListState.unknownFiles.length > 0;
+  var hasDanmaku = state.danmakuLoaded || hasFiles;
+
+  if (fileListSection) fileListSection.style.display = '';
+  toggleDanmaku.disabled = !hasDanmaku;
+  if (!hasDanmaku) {
     toggleDanmaku.checked = false;
-    return;
   }
-  if (fileInfoEl) fileInfoEl.style.display = '';
-  if (notFoundEl) notFoundEl.style.display = 'none';
-  toggleDanmaku.disabled = false;
-  var nameEl = fileInfoEl ? fileInfoEl.querySelector('.danmaku-file-name') : null;
-  var pathEl = fileInfoEl ? fileInfoEl.querySelector('.danmaku-file-path') : null;
-  if (nameEl) nameEl.textContent = state.danmakuRelativePath || state.danmakuFileName || '';
-  if (pathEl) pathEl.textContent = '';
 }
 
 function updateCanvasModeUI() {
   var isCanvas = state.renderMode === 'canvas';
   var supported = isCanvasSupported();
-  var canUseCanvas = supported && (state.danmakuType === 'nico-json');
-  if (!canUseCanvas) {
+  if (!supported) {
     if (canvasSection) canvasSection.style.display = 'none';
+    if (isCanvas) {
+      state.renderMode = 'css';
+      renderModeCanvas.checked = false;
+      iina.postMessage("set-render-mode", { mode: 'css' });
+    }
     return;
   }
   if (canvasSection) canvasSection.style.display = '';
-  if (!isCanvas) {
-    state.renderMode = 'css';
-    renderModeCanvas.checked = false;
-    iina.postMessage("set-render-mode", { mode: 'css' });
-  }
   if (fontsizeSection) fontsizeSection.style.display = isCanvas ? 'none' : '';
   if (durationSection) durationSection.style.display = isCanvas ? 'none' : '';
   if (laneLimitSection) laneLimitSection.style.display = isCanvas ? 'none' : '';
@@ -101,7 +270,8 @@ function updateCanvasModeUI() {
 }
 
 function updateEnabledUI() {
-  var show = state.enabled && state.danmakuLoaded;
+  var hasFiles = fileListState.xmlFiles.length > 0 || fileListState.jsonFiles.length > 0 || fileListState.unknownFiles.length > 0;
+  var show = state.enabled && (state.danmakuLoaded || hasFiles);
   settingsSections.forEach(function(sec) {
     if (sec) sec.style.display = show ? '' : 'none';
   });
@@ -132,7 +302,8 @@ var i18n = {
     block_bottom: "Block Bottom",
     lane_limit: "Lane Limit",
     danmaku_not_found: "No danmaku file found",
-    manual_load: "Load Danmaku"
+    manual_load: "Load Danmaku",
+    file_add: "Add"
   },
   ja: {
     danmaku_visible: "コメント表示",
@@ -154,7 +325,8 @@ var i18n = {
     block_bottom: "下部屏蔽",
     lane_limit: "軌道制限",
     danmaku_not_found: "弹幕ファイルが見つかりません",
-    manual_load: "コメント読込"
+    manual_load: "コメント読込",
+    file_add: "追加"
   },
   zh: {
     danmaku_visible: "弹幕显示",
@@ -176,7 +348,8 @@ var i18n = {
     block_bottom: "底部屏蔽",
     lane_limit: "轨道限制",
     danmaku_not_found: "未找到弹幕文件",
-    manual_load: "手动加载弹幕"
+    manual_load: "手动加载弹幕",
+    file_add: "添加"
   }
 };
 
@@ -197,8 +370,10 @@ function applyI18n() {
 }
 
 function updateUI() {
-  toggleDanmaku.checked = state.enabled && state.danmakuLoaded;
-  toggleDanmaku.disabled = !state.danmakuLoaded;
+  var hasFiles = fileListState.xmlFiles.length > 0 || fileListState.jsonFiles.length > 0 || fileListState.unknownFiles.length > 0;
+  var hasDanmaku = state.danmakuLoaded || hasFiles;
+  toggleDanmaku.checked = state.enabled && hasDanmaku;
+  toggleDanmaku.disabled = !hasDanmaku;
   renderModeCanvas.checked = state.renderMode === 'canvas';
   renderModeCanvas.disabled = !isCanvasSupported();
   opacitySlider.value = getActiveOpacity();
@@ -237,9 +412,11 @@ toggleDanmaku.addEventListener("change", function () {
   iina.postMessage("toggle-danmaku");
 });
 
-document.getElementById("manual-load-btn").addEventListener("click", function () {
-  iina.postMessage("manual-load-danmaku");
-});
+if (fileAddBtn) {
+  fileAddBtn.addEventListener("click", function () {
+    iina.postMessage("danmaku-file-add");
+  });
+}
 
 renderModeCanvas.addEventListener("change", function () {
   if (!isCanvasSupported()) {
@@ -249,6 +426,7 @@ renderModeCanvas.addEventListener("change", function () {
   var mode = renderModeCanvas.checked ? 'canvas' : 'css';
   state.renderMode = mode;
   updateCanvasModeUI();
+  renderFileList();
   iina.postMessage("set-render-mode", { mode: mode });
   iina.postMessage("set-opacity", { opacity: getActiveOpacity() });
   iina.postMessage("set-fontscale", { scale: getActiveFontScale() });
@@ -323,6 +501,21 @@ iina.onMessage("danmaku-type", function (data) {
   if (data.isLoaded !== undefined) state.danmakuLoaded = data.isLoaded;
   updateUI();
   updateEnabledUI();
+});
+
+iina.onMessage("danmaku-file-list", function (data) {
+  fileListState.xmlFiles = data.xmlFiles || [];
+  fileListState.jsonFiles = data.jsonFiles || [];
+  fileListState.unknownFiles = data.unknownFiles || [];
+  fileListState.selectedPaths = data.selectedPaths || [];
+  renderFileList();
+  updateDanmakuInfoUI();
+  updateCanvasModeUI();
+});
+
+iina.onMessage("danmaku-file-error", function (data) {
+  fileListState.errorPaths[data.path] = data.message;
+  renderFileList();
 });
 
 applyI18n();
