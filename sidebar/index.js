@@ -511,6 +511,7 @@ iina.onMessage("danmaku-file-list", function (data) {
   renderFileList();
   updateDanmakuInfoUI();
   updateCanvasModeUI();
+  renderModeCanvas.disabled = !isCanvasSupported();
 });
 
 iina.onMessage("danmaku-file-error", function (data) {

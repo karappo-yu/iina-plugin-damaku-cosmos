@@ -1,8 +1,8 @@
 /**
- * renderer.js — 弹幕创建与 DOM 渲染
+ * renderer.js — 弹幕创建与 DOM 渲染（对象池优化版）
  *
  * 将解析后的弹幕数据渲染为 DOM 元素，处理各种模式（滚动/固定/定位）的布局逻辑。
- * 对应原项目: src/comments/*.ts
+ * 引入了 DOM 对象池，大幅减少频繁 createElement 和 remove 带来的 GC 压力。
  */
 
 const container = document.getElementById('danmaku-container');
@@ -49,6 +49,47 @@ window.getActiveDanmaku = function () {
   return activeDanmaku;
 };
 
+// ========== DOM 对象池 (DOM Pool) 优化 ==========
+const danmakuPool = [];
+const MAX_POOL_SIZE = 800; // 防止池子无限膨胀占用过多内存
+
+/**
+ * 从对象池中获取一个可用的弹幕 DOM 元素，如果池为空则创建新的。
+ * 并且会重置该元素的所有遗留状态。
+ */
+function getDanmakuElement() {
+  let el;
+  if (danmakuPool.length > 0) {
+    el = danmakuPool.pop();
+  } else {
+    el = document.createElement('div');
+  }
+
+  // 彻底清理上一轮使用的遗留状态
+  el.className = 'dm-item';
+  el.style.cssText = ''; // 清空所有内联样式及 CSS 变量
+  el.innerHTML = '';
+  if (el.dataset.size) delete el.dataset.size;
+  el.onanimationend = null;
+
+  return el;
+}
+
+/**
+ * 回收弹幕 DOM 元素到对象池中
+ */
+function recycleDanmakuElement(el) {
+  if (el.parentNode) {
+    el.parentNode.removeChild(el);
+  }
+  el.onanimationend = null; // 取消事件监听
+  
+  if (danmakuPool.length < MAX_POOL_SIZE) {
+    danmakuPool.push(el);
+  }
+}
+// ===============================================
+
 /**
  * 逆播放：反转所有活跃滚动弹幕的动画方向
  */
@@ -62,7 +103,8 @@ window.reverseAllActiveDanmaku = function (newReverseState, lastTime) {
     const d = item.d;
     if (item.type !== 'scroll') return;
     const durMs = scrollDuration;
-    const currentSpeedMult = getSpeedMultiplier(lastTime, d._isOwner);
+    // 注意：假设外部有 getSpeedMultiplier，这里正常调用
+    const currentSpeedMult = typeof getSpeedMultiplier === 'function' ? getSpeedMultiplier(lastTime, d._isOwner) : 1;
     const adjustedDurMs = durMs / currentSpeedMult;
     const elapsedMs = (lastTime - d.t) * 10;
     const remainingMs = adjustedDurMs - elapsedMs;
@@ -72,7 +114,7 @@ window.reverseAllActiveDanmaku = function (newReverseState, lastTime) {
     const elW = rect.width;
 
     el.style.animation = 'none';
-    el.offsetHeight;
+    el.offsetHeight; // 强制重绘
 
     if (newReverseState) {
       const mirroredX = winW - currentX;
@@ -90,7 +132,7 @@ window.reverseAllActiveDanmaku = function (newReverseState, lastTime) {
   });
 
   // 逆播放切换后需重置轨道
-  resetLaneData();
+  if (typeof resetLaneData === 'function') resetLaneData();
 };
 
 /**
@@ -102,10 +144,11 @@ window.reverseAllActiveDanmaku = function (newReverseState, lastTime) {
 window.createDanmaku = function (d, currentTime = null) {
   if (!danmakuVisible) return;
   if (d.invisible) return;
-  if (isBanActive(d.t)) return;
+  // 假设外部有 isBanActive 函数
+  if (typeof isBanActive === 'function' && isBanActive(d.t)) return;
 
-  // 获取默认命令覆盖
-  const defCmd = getDefaultCommand(d.t);
+  // 获取默认命令覆盖（假设外部有 getDefaultCommand 函数）
+  const defCmd = typeof getDefaultCommand === 'function' ? getDefaultCommand(d.t) : {};
   const effectiveMode = defCmd.loc || d.m;
   const effectiveColor = defCmd.color || d.c;
   const effectiveSize = defCmd.size || d.size;
@@ -127,31 +170,33 @@ window.createDanmaku = function (d, currentTime = null) {
   const durMs = d.durationSec !== null && d.durationSec !== undefined
     ? d.durationSec * 1000
     : ((isScroll || isReverseScroll) ? scrollDuration : fixedDuration);
-  const speedMult = getSpeedMultiplier(d.t, d._isOwner);
+  const speedMult = typeof getSpeedMultiplier === 'function' ? getSpeedMultiplier(d.t, d._isOwner) : 1;
   const adjustedDurMs = durMs / speedMult;
   const videoTimeMs = d.t * 10;
   const elapsedMs = currentTime !== null ? (currentTime - d.t) * 10 : 0;
 
   if (elapsedMs >= adjustedDurMs || elapsedMs < 0) return;
 
-  // 创建 DOM 元素
-  const el = document.createElement('div');
-  el.className = 'dm-item';
+  // 创建 DOM 元素（从对象池获取）
+  const el = getDanmakuElement();
 
   // 文本内容处理
   let posX = null, posY = null;
-  let displayText = d.text;
-  // 所有弹幕：Tab 替换为全角空格×2（参考原项目 BaseComment 构造函数）
+  let displayText = d.text || '';
+  // 所有弹幕：Tab 替换为全角空格×2
   displayText = displayText.replace(/\t/g, '\u2003');
+  
   if (d._isFlash) {
-    const processed = preprocessFlashTextWithRuby(displayText);
+    const processed = typeof preprocessFlashTextWithRuby === 'function' 
+        ? preprocessFlashTextWithRuby(displayText) 
+        : { hasRuby: false, html: displayText };
     if (processed.hasRuby) {
       el.innerHTML = processed.html;
     } else {
-      el.textContent = preprocessFlashText(displayText);
+      el.textContent = typeof preprocessFlashText === 'function' ? preprocessFlashText(displayText) : displayText;
     }
   } else if (isPositioned) {
-    const parsed = parsePositionedContent(displayText);
+    const parsed = typeof parsePositionedContent === 'function' ? parsePositionedContent(displayText) : null;
     if (parsed) {
       posX = parsed.posX;
       posY = parsed.posY;
@@ -167,28 +212,28 @@ window.createDanmaku = function (d, currentTime = null) {
   el.style.color = effectiveColor;
   el.dataset.size = effectiveSize;
 
-  // 字号
-  // 判断是否为标准字号（small=15, medium=25, big=36）
+  // 字号处理
   const isStandardSize = effectiveSize === 15 || effectiveSize === 25 || effectiveSize === 36;
-  const sizeKey = getSizeKey(effectiveSize);
-  // 标准字号使用映射表，自定义字号直接使用传入值
-  const resolvedFs = isStandardSize ? resolveFontSize(effectiveSize, d._isFlash) : effectiveSize;
-  const lineCount = (d.text.match(/\n/g) || []).length + 1;
+  const sizeKey = typeof getSizeKey === 'function' ? getSizeKey(effectiveSize) : 'medium';
+  const resolvedFs = isStandardSize && typeof resolveFontSize === 'function' ? resolveFontSize(effectiveSize, d._isFlash) : effectiveSize;
+  const lineCount = (displayText.match(/\n/g) || []).length + 1;
   const isMultiLine = lineCount > 1;
-  // CA 弹幕 (layer >= 0) 不受全局 fontScale 缩放影响，保持原始比例
-  // 参考 niconicomments: layer === -1 ? options.scale : 1
+  
   const effectiveFontScale = (d._layer === -1) ? fontScale : 1.0;
   let danmakuFs;
+  // 假设外部有 NICO_LINE_HEIGHT 常量
+  const lineHeight = (typeof NICO_LINE_HEIGHT !== 'undefined' && NICO_LINE_HEIGHT[sizeKey]) ? NICO_LINE_HEIGHT[sizeKey] : 1.2;
+
   if (isMultiLine && d?.patissier) {
-    danmakuFs = (100 / (lineCount * NICO_LINE_HEIGHT[sizeKey]) * effectiveFontScale).toFixed(4) + 'vh';
+    danmakuFs = (100 / (lineCount * lineHeight) * effectiveFontScale).toFixed(4) + 'vh';
   } else {
     danmakuFs = (resolvedFs / 27 * (100 / 15) * effectiveFontScale).toFixed(4) + 'vh';
   }
   el.style.fontSize = danmakuFs;
-  el.style.lineHeight = NICO_LINE_HEIGHT[sizeKey];
+  el.style.lineHeight = lineHeight;
 
   // 字体族
-  if (effectiveFont && NICO_FONTS[effectiveFont]) {
+  if (effectiveFont && typeof NICO_FONTS !== 'undefined' && NICO_FONTS[effectiveFont]) {
     el.classList.add(`dm-${effectiveFont}`);
     el.style.fontFamily = NICO_FONTS[effectiveFont];
   }
@@ -219,12 +264,22 @@ window.createDanmaku = function (d, currentTime = null) {
   else if (isTop) el.classList.add('dm-top');
   else if (isPositioned) el.classList.add('dm-positioned');
 
+  // 先添加到 DOM 以获取正确的渲染宽度
   container.appendChild(el);
 
   // 固定弹幕：后半段降级优先级
   if ((isBottom || isTop) && !d.ender) {
-    setTimeout(() => el.classList.add('priority-low'), adjustedDurMs / 2);
+    setTimeout(() => {
+      // 检查元素是否还在DOM树中，防止定时器触发时已被回收
+      if (el.parentNode) el.classList.add('priority-low');
+    }, adjustedDurMs / 2);
   }
+
+  // 通用的动画结束清理逻辑
+  const handleAnimationEnd = (item) => {
+    recycleDanmakuElement(el);
+    activeDanmaku.delete(item);
+  };
 
   // ========== 定位弹幕 ==========
   if (isPositioned) {
@@ -252,10 +307,7 @@ window.createDanmaku = function (d, currentTime = null) {
     const item = { el, d, type: 'fixed' };
     activeDanmaku.add(item);
 
-    el.addEventListener('animationend', () => {
-      el.remove();
-      activeDanmaku.delete(item);
-    });
+    el.onanimationend = () => handleAnimationEnd(item);
     return;
   }
 
@@ -269,7 +321,7 @@ window.createDanmaku = function (d, currentTime = null) {
       el.style.setProperty('--dur', `${adjustedDurMs}ms`);
       el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
-      const isReverse = isReverseScroll || isReverseActive(d.t, d._isOwner);
+      const isReverse = isReverseScroll || (typeof isReverseActive === 'function' && isReverseActive(d.t, d._isOwner));
       if (isReverse) {
         el.style.setProperty('--start-x', `-100%`);
         el.style.setProperty('--end-x', `100vw`);
@@ -278,29 +330,30 @@ window.createDanmaku = function (d, currentTime = null) {
         el.style.setProperty('--end-x', `-100%`);
       }
 
-      // CA 多行滚动弹幕 (layer >= 0) 也需要轨道分配
-      // 非 CA 多行弹幕直接放在顶部
       if (d._layer >= 0 && d._textW === undefined) {
         d._textW = el.offsetWidth;
       }
       const textW = d._textW || el.offsetWidth;
       const winW = window.innerWidth;
-      // CA 多行弹幕的轨道需求：按行数计算，但不超过可用轨道数
-      const maxAvailableLanes = Math.floor(getMaxLanes());
+      
+      const maxAvailableLanes = Math.floor(typeof getMaxLanes === 'function' ? getMaxLanes() : 10);
       const lanesNeeded = Math.min(Math.ceil(lineCount), maxAvailableLanes);
 
       let lane = d._lane;
       let offsetLevel = (d._offsetLevel !== undefined) ? d._offsetLevel : 0;
-      const isMemory = lane !== undefined && lane < getMaxLanes();
+      const isMemory = lane !== undefined && typeof getMaxLanes === 'function' && lane < getMaxLanes();
 
       if (isMemory) {
         if (blockForceLane && (d._forced ?? false)) {
-          el.remove();
+          recycleDanmakuElement(el);
           return;
         }
       } else {
-        // CA 弹幕使用碰撞检测分配轨道
-        const result = getFreeScrollLane(textW, winW, adjustedDurMs, videoTimeMs, lanesNeeded, d._layer, d._isOwner);
+        // 分配轨道
+        const result = typeof getFreeScrollLane === 'function' 
+          ? getFreeScrollLane(textW, winW, adjustedDurMs, videoTimeMs, lanesNeeded, d._layer, d._isOwner)
+          : null;
+
         if (result) {
           lane = result.lane;
           offsetLevel = result.offsetLevel;
@@ -308,13 +361,11 @@ window.createDanmaku = function (d, currentTime = null) {
           d._offsetLevel = offsetLevel;
           d._forced = result.forced;
 
-          // 更新轨道占用
           const speed = (winW + textW) / durMs;
           const tailEnterTime = videoTimeMs + (textW / speed) + 100;
           const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
-          occupyLane(lane, offsetLevel, lanesNeeded, 'scroll', { tailEnterTime, tailReachOneThirdTime }, d._layer, d._isOwner);
+          if (typeof occupyLane === 'function') occupyLane(lane, offsetLevel, lanesNeeded, 'scroll', { tailEnterTime, tailReachOneThirdTime }, d._layer, d._isOwner);
         } else {
-          // CA 弹幕强制放置在 lane 0（因为不同 layer 不碰撞）
           lane = 0;
           offsetLevel = 0;
           d._lane = lane;
@@ -323,25 +374,20 @@ window.createDanmaku = function (d, currentTime = null) {
         }
       }
 
-      if (lane !== undefined) {
+      if (lane !== undefined && typeof getVisualPosition === 'function') {
         const pos = getVisualPosition(lane, offsetLevel, 'scroll');
         if (pos.top) el.style.top = pos.top;
       } else {
         el.style.top = '0';
       }
 
-      // 全屏弹幕允许使用全屏宽度
       if (d.full) {
         el.style.maxWidth = '100vw';
       }
 
       const item = { el, d, type: 'scroll' };
       activeDanmaku.add(item);
-
-      el.addEventListener('animationend', () => {
-        el.remove();
-        activeDanmaku.delete(item);
-      });
+      el.onanimationend = () => handleAnimationEnd(item);
       return;
     }
 
@@ -357,11 +403,7 @@ window.createDanmaku = function (d, currentTime = null) {
 
     const item = { el, d, type: 'fixed' };
     activeDanmaku.add(item);
-
-    el.addEventListener('animationend', () => {
-      el.remove();
-      activeDanmaku.delete(item);
-    });
+    el.onanimationend = () => handleAnimationEnd(item);
     return;
   }
 
@@ -371,32 +413,31 @@ window.createDanmaku = function (d, currentTime = null) {
   const winW = window.innerWidth;
   const lanesNeeded = Math.ceil(effectiveSize / 25);
 
-  // 轨道分配
   let lane = d._lane;
   let offsetLevel = (d._offsetLevel !== undefined) ? d._offsetLevel : 0;
-  const isMemory = lane !== undefined && lane < getMaxLanes();
+  const isMemory = lane !== undefined && typeof getMaxLanes === 'function' && lane < getMaxLanes();
 
   if (isMemory) {
     if (blockForceLane && (d._forced ?? false)) {
-      el.remove();
+      recycleDanmakuElement(el);
       return;
     }
   } else {
     let result = null;
-    if (isScroll || isReverseScroll) {
+    if (typeof getFreeScrollLane === 'function' && (isScroll || isReverseScroll)) {
       result = getFreeScrollLane(textW, winW, adjustedDurMs, videoTimeMs, lanesNeeded, d._layer, d._isOwner);
-    } else if (isTop) {
+    } else if (typeof getFreeFixedLane === 'function' && isTop) {
       result = getFreeFixedLane('top', adjustedDurMs, videoTimeMs, lanesNeeded, d._layer, d._isOwner);
-    } else if (isBottom) {
+    } else if (typeof getFreeFixedLane === 'function' && isBottom) {
       result = getFreeFixedLane('bottom', adjustedDurMs, videoTimeMs, lanesNeeded, d._layer, d._isOwner);
     }
 
     if (!result) {
-      el.remove();
+      recycleDanmakuElement(el);
       return;
     }
     if (blockForceLane && result.forced) {
-      el.remove();
+      recycleDanmakuElement(el);
       return;
     }
 
@@ -408,23 +449,27 @@ window.createDanmaku = function (d, currentTime = null) {
   }
 
   // 更新轨道占用状态
-  if (isScroll || isReverseScroll) {
-    const speed = (winW + textW) / durMs;
-    const tailEnterTime = videoTimeMs + (textW / speed) + 100;
-    const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
-    occupyLane(lane, offsetLevel, lanesNeeded, 'scroll', { tailEnterTime, tailReachOneThirdTime }, d._layer, d._isOwner);
-  } else if (isTop) {
-    const leaveScreenTime = videoTimeMs + durMs;
-    occupyLane(lane, offsetLevel, lanesNeeded, 'top', { leaveScreenTime }, d._layer, d._isOwner);
-  } else if (isBottom) {
-    const leaveScreenTime = videoTimeMs + durMs;
-    occupyLane(lane, offsetLevel, lanesNeeded, 'bottom', { leaveScreenTime }, d._layer, d._isOwner);
+  if (typeof occupyLane === 'function') {
+    if (isScroll || isReverseScroll) {
+      const speed = (winW + textW) / durMs;
+      const tailEnterTime = videoTimeMs + (textW / speed) + 100;
+      const tailReachOneThirdTime = videoTimeMs + (2 * winW / 3 + textW) / speed;
+      occupyLane(lane, offsetLevel, lanesNeeded, 'scroll', { tailEnterTime, tailReachOneThirdTime }, d._layer, d._isOwner);
+    } else if (isTop) {
+      const leaveScreenTime = videoTimeMs + durMs;
+      occupyLane(lane, offsetLevel, lanesNeeded, 'top', { leaveScreenTime }, d._layer, d._isOwner);
+    } else if (isBottom) {
+      const leaveScreenTime = videoTimeMs + durMs;
+      occupyLane(lane, offsetLevel, lanesNeeded, 'bottom', { leaveScreenTime }, d._layer, d._isOwner);
+    }
   }
 
   // 视觉定位
-  const pos = getVisualPosition(lane, offsetLevel, (isScroll || isReverseScroll) ? 'scroll' : isTop ? 'top' : 'bottom');
-  if (pos.top) el.style.top = pos.top;
-  if (pos.bottom) el.style.bottom = pos.bottom;
+  if (typeof getVisualPosition === 'function') {
+    const pos = getVisualPosition(lane, offsetLevel, (isScroll || isReverseScroll) ? 'scroll' : isTop ? 'top' : 'bottom');
+    if (pos.top) el.style.top = pos.top;
+    if (pos.bottom) el.style.bottom = pos.bottom;
+  }
 
   // 固定弹幕：宽度限制
   if ((isTop || isBottom) && d._textW !== undefined) {
@@ -440,7 +485,7 @@ window.createDanmaku = function (d, currentTime = null) {
   el.style.setProperty('--delay', `-${elapsedMs}ms`);
 
   // 滚动方向
-  const isReverse = isReverseScroll || isReverseActive(d.t, d._isOwner);
+  const isReverse = isReverseScroll || (typeof isReverseActive === 'function' && isReverseActive(d.t, d._isOwner));
 
   if (isScroll || isReverseScroll) {
     if (isReverse) {
@@ -461,17 +506,16 @@ window.createDanmaku = function (d, currentTime = null) {
 
   const item = { el, d, type: (isScroll || isReverseScroll) ? 'scroll' : 'fixed' };
   activeDanmaku.add(item);
-
-  el.addEventListener('animationend', () => {
-    el.remove();
-    activeDanmaku.delete(item);
-  });
+  el.onanimationend = () => handleAnimationEnd(item);
 };
 
 /**
- * 清空所有活跃弹幕
+ * 清空所有活跃弹幕，并将它们归还给对象池
  */
 window.clearAllDanmaku = function () {
-  container.innerHTML = '';
+  // 将所有活跃 DOM 元素回收到池中，而非简单粗暴清空 innerHTML
+  activeDanmaku.forEach(item => {
+    recycleDanmakuElement(item.el);
+  });
   activeDanmaku.clear();
 };
